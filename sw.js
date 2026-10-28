@@ -1,5 +1,5 @@
 // PokeBundels service worker — app offline beschikbaar, kaartafbeeldingen gecachet
-const VERSION = 'pb-1.0.3';
+const VERSION = 'pb-1.0.4';
 const SHELL = [
   './', './index.html', './styles.css', './manifest.webmanifest',
   './js/app.js', './js/logic.js', './js/db.js', './js/tcgdex.js',
@@ -7,7 +7,7 @@ const SHELL = [
 ];
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  e.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL.map((u) => new Request(u, { cache: 'reload' })))).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', (e) => {
@@ -41,7 +41,7 @@ self.addEventListener('fetch', (e) => {
   // App-bestanden: netwerk eerst, val terug op cache (zo krijg je updates meteen)
   if (url.origin === self.location.origin) {
     e.respondWith(
-      fetch(req).then((res) => {
+      fetch(req, { cache: 'no-cache' }).then((res) => {
         const copy = res.clone();
         caches.open(VERSION).then((c) => c.put(req, copy));
         return res;

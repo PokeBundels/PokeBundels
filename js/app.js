@@ -6,7 +6,7 @@ import {
   THEMES, DEFAULT_SETTINGS, MODES, analyse, isNonShiny, themeOf, normNr, parseImport,
 } from './logic.js';
 
-const VERSION = '1.0.3';
+const VERSION = '1.0.4';
 const DAC7 = { sales: 30, revenue: 2000 };
 const PLATFORMS = ['Vinted', '2dehands', 'Anders'];
 
@@ -937,7 +937,7 @@ async function start() {
   persist();
   render();
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
-    navigator.serviceWorker.register('./sw.js').catch(() => {});
+    navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' }).then((r) => r.update()).catch(() => {});
   }
 }
 
