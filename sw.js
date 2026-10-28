@@ -1,21 +1,29 @@
-// PokeBundels service worker — app offline beschikbaar, kaartafbeeldingen gecachet
-const VERSION = 'pb-1.0.4';
-const SHELL = [
-  './', './index.html', './styles.css', './manifest.webmanifest',
-  './js/app.js', './js/logic.js', './js/db.js', './js/tcgdex.js',
-  './icons/icon-192.png', './icons/icon-512.png',
+// PokeBundels service worker: werkt zonder bereik en meldt nieuwe versies.
+// Verhoog VERSION bij elke release (samen met VERSION in js/app.js).
+const VERSION = '1.1.0';
+const CACHE = 'pb-' + VERSION;
+const FILES = [
+  './', 'index.html', 'styles.css', 'manifest.webmanifest',
+  'js/app.js', 'js/logic.js', 'js/db.js', 'js/tcgdex.js',
+  'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-maskable-512.png', 'icons/apple-touch-icon.png',
 ];
 
+// cache: 'reload' = altijd vers van de server, niet uit de browsercache (GitHub Pages bewaart 10 min).
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL.map((u) => new Request(u, { cache: 'reload' })))).then(() => self.skipWaiting()));
+  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(FILES.map((f) => new Request(f, { cache: 'reload' })))));
 });
 
 self.addEventListener('activate', (e) => {
   e.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== VERSION && k !== 'pb-images').map((k) => caches.delete(k))))
+      .then((keys) => Promise.all(keys.filter((k) => k.startsWith('pb-') && k !== CACHE && k !== 'pb-images').map((k) => caches.delete(k))))
       .then(() => self.clients.claim())
   );
+});
+
+// De app vraagt de nieuwe versie actief te maken als je op de updatemelding tikt.
+self.addEventListener('message', (e) => {
+  if (e.data === 'skip') self.skipWaiting();
 });
 
 self.addEventListener('fetch', (e) => {
@@ -23,7 +31,7 @@ self.addEventListener('fetch', (e) => {
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
 
-  // Kaartafbeeldingen: eerst cache
+  // Kaartafbeeldingen: eerst uit de cache
   if (url.hostname === 'assets.tcgdex.net') {
     e.respondWith(caches.open('pb-images').then(async (c) => {
       const hit = await c.match(req);
@@ -35,17 +43,18 @@ self.addEventListener('fetch', (e) => {
     return;
   }
 
-  // API: altijd netwerk (setgegevens worden in IndexedDB bewaard)
-  if (url.hostname === 'api.tcgdex.net') return;
-
-  // App-bestanden: netwerk eerst, val terug op cache (zo krijg je updates meteen)
-  if (url.origin === self.location.origin) {
-    e.respondWith(
-      fetch(req, { cache: 'no-cache' }).then((res) => {
-        const copy = res.clone();
-        caches.open(VERSION).then((c) => c.put(req, copy));
+  // Eigen bestanden: uit de cache (snel en zonder bereik); nieuwe versies komen via een nieuwe service worker.
+  if (url.origin !== self.location.origin) return;
+  e.respondWith(
+    caches.match(req, { ignoreSearch: true }).then((hit) => {
+      if (hit) return hit;
+      return fetch(req).then((res) => {
+        if (res.ok && res.type === 'basic') {
+          const copy = res.clone();
+          caches.open(CACHE).then((c) => c.put(req, copy));
+        }
         return res;
-      }).catch(() => caches.match(req).then((r) => r || caches.match('./index.html')))
-    );
-  }
+      }).catch(() => caches.match('index.html'));
+    })
+  );
 });

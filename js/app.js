@@ -6,7 +6,7 @@ import {
   THEMES, DEFAULT_SETTINGS, MODES, analyse, isNonShiny, themeOf, normNr, parseImport,
 } from './logic.js';
 
-const VERSION = '1.0.4';
+const VERSION = '1.1.0';
 const DAC7 = { sales: 30, revenue: 2000 };
 const PLATFORMS = ['Vinted', '2dehands', 'Anders'];
 
@@ -22,6 +22,7 @@ const state = {
   invFilter: { all: false, owned: false, q: '' },
   mode: 1,
   pick: new Set(),    // geselecteerde bundels om te verkopen
+  openAcc: null,      // open groep in Instellingen
   invVersion: 0,
   analysisCache: {},
 };
@@ -106,12 +107,73 @@ function openSheet(html, onMount) {
   root.hidden = false;
   document.body.classList.add('noscroll');
   onMount?.(root.querySelector('.sheet'));
+  navSync();
 }
 function closeSheet() {
   const root = $('#sheet');
   root.hidden = true;
   root.innerHTML = '';
   document.body.classList.remove('noscroll');
+  navSync();
+}
+
+// ---------- terugknop van de telefoon: stap terug in plaats van afsluiten ----------
+
+let navPushed = false;
+let navSkip = false;
+function navRoot() { return $('#sheet').hidden && state.view === 'inv' && !state.invSet; }
+function navSync() {
+  if (navRoot()) {
+    if (navPushed) { navPushed = false; navSkip = true; history.back(); }
+  } else if (!navPushed) {
+    navPushed = true;
+    history.pushState({ pb: 1 }, '');
+  }
+}
+function navBack() {
+  if (!$('#sheet').hidden) { closeSheet(); return; }
+  if (state.view === 'inv' && state.invSet) { state.invSet = null; render(); return; }
+  if (state.view !== 'inv') { state.view = 'inv'; state.invSet = null; render(); window.scrollTo(0, 0); }
+}
+window.addEventListener('popstate', () => {
+  if (navSkip) { navSkip = false; return; }
+  navPushed = false;
+  navBack();
+  setTimeout(navSync, 0);
+});
+
+// ---------- updates ----------
+
+let swReg = null;
+let swWaiting = null;
+function showUpd(w) { swWaiting = w; $('#upd').hidden = false; }
+function setupSW() {
+  if (!('serviceWorker' in navigator) || location.protocol === 'file:') return;
+  let reloading = false;
+  const hadController = !!navigator.serviceWorker.controller; // eerste bezoek: niet herladen
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (reloading || !hadController) return;
+    reloading = true;
+    location.reload();
+  });
+  navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' }).then((r) => {
+    swReg = r;
+    if (r.waiting && navigator.serviceWorker.controller) showUpd(r.waiting);
+    r.addEventListener('updatefound', () => {
+      const n = r.installing;
+      n?.addEventListener('statechange', () => {
+        if (n.state === 'installed' && navigator.serviceWorker.controller) showUpd(n);
+      });
+    });
+    setInterval(() => r.update().catch(() => {}), 30 * 60 * 1000);
+  }).catch(() => {});
+}
+async function checkUpdate() {
+  if (!swReg) { toast('Updates zoeken lukt hier niet.'); return; }
+  try {
+    await swReg.update();
+    setTimeout(() => { if (!swWaiting) toast(`Je hebt de nieuwste versie (${VERSION}).`); }, 1500);
+  } catch { toast('Geen verbinding om updates te zoeken.'); }
 }
 
 const ICONS = {
@@ -144,6 +206,7 @@ function render() {
   const main = $('#main');
   const views = { inv: renderInventory, ana: renderAnalysis, bun: renderBundles, sale: renderSales, set: renderSettings };
   main.innerHTML = views[state.view]();
+  navSync();
 }
 
 // ----- Inventaris -----
@@ -172,7 +235,6 @@ function renderInventory() {
     <header class="page-head">
       <h1>Inventaris</h1>
       <p class="muted">Niet-blinkende kaarten (common/uncommon) per set.</p>
-      <p class="badge gold">TEST · versie ${VERSION}</p>
     </header>
     <div class="stats">
       <div class="stat"><b>${total}</b><span>kaarten</span></div>
@@ -737,14 +799,18 @@ async function undoSale(id) {
 
 function renderSettings() {
   const S = state.settings;
+  const acc = (id, title, sum, body) => `
+    <details class="acc" data-acc="set" data-id="${id}" ${state.openAcc === id ? 'open' : ''}>
+      <summary><span class="acc-t">${title}</span><span class="acc-s">${sum}</span></summary>
+      <div class="acc-b">${body}</div>
+    </details>`;
   const bundleField = (key, label) => `
-    <fieldset class="card"><legend>${label}</legend>
-      <div class="three">
-        <label class="field"><span>Kaarten</span><input class="input" type="number" min="1" data-setting="${key}.size" value="${S[key].size}"></label>
-        <label class="field"><span>Holo/reverse</span><input class="input" type="number" min="0" data-setting="${key}.shiny" value="${S[key].shiny}"></label>
-        <label class="field"><span>Prijs (€)</span><input class="input" type="number" min="0" step="0.5" data-setting="${key}.price" value="${S[key].price}"></label>
-      </div>
-    </fieldset>`;
+    <div class="acc-sub">${label}</div>
+    <div class="three">
+      <label class="field"><span>Kaarten</span><input class="input" type="number" min="1" data-setting="${key}.size" value="${S[key].size}"></label>
+      <label class="field"><span>Holo/reverse</span><input class="input" type="number" min="0" data-setting="${key}.shiny" value="${S[key].shiny}"></label>
+      <label class="field"><span>Prijs (€)</span><input class="input" type="number" min="0" step="0.5" data-setting="${key}.price" value="${S[key].price}"></label>
+    </div>`;
   const premiumOpts = S.premiumSets.map((id) => `
     <div class="prem-row">
       <div><div class="prem-name">${esc(setName(id))}</div><div class="muted small">${esc(id)}</div></div>
@@ -752,39 +818,38 @@ function renderSettings() {
     </div>`).join('') || '<p class="muted small">Geen premium sets.</p>';
   const themeOpts = Object.entries(THEMES).map(([key, t]) => `
     <label class="check"><input type="checkbox" data-action="toggle-theme" data-key="${key}" ${S.themes[key] ? 'checked' : ''}> ${esc(t.label)}</label>`).join('');
+  const themeOn = Object.entries(THEMES).filter(([k]) => S.themes[k]).map(([, t]) => t.label.split(' ')[0]);
   return `
     <header class="page-head"><h1>Instellingen</h1></header>
-    ${bundleField('setBundle', 'Bundel per set')}
-    ${bundleField('premiumBundle', 'Premium set')}
-    ${bundleField('themeBundle', 'Themaset')}
-    ${bundleField('randomBundle', 'Random pick')}
-    <fieldset class="card"><legend>Premium sets</legend>
+    <div class="accs">
+    ${acc('bundles', 'Bundels', `${eur(S.setBundle.price)} · ${eur(S.premiumBundle.price)} · ${eur(S.themeBundle.price)} · ${eur(S.randomBundle.price)}`,
+      bundleField('setBundle', 'Bundel per set') + bundleField('premiumBundle', 'Premium set') + bundleField('themeBundle', 'Themaset') + bundleField('randomBundle', 'Random pick'))}
+    ${acc('premium', 'Premium sets', S.premiumSets.map(setName).join(' · ') || 'geen', `
       <p class="muted small">Bundels uit deze sets krijgen de premiumprijs.</p>
       ${premiumOpts}
-      <div class="btn-row"><button class="btn small" data-action="add-premium">${icon('plus', 16)} Premium set toevoegen</button></div>
-    </fieldset>
-    <fieldset class="card"><legend>Thema's</legend>${themeOpts}
+      <div class="btn-row"><button class="btn small" data-action="add-premium">${icon('plus', 16)} Premium set toevoegen</button></div>`)}
+    ${acc('themes', "Thema's", themeOn.join(' · ') || 'uit', `${themeOpts}
       <label class="check"><input type="checkbox" data-action="toggle-tfp" ${S.themesFromPremium ? 'checked' : ''}> Themakaarten ook uit premium sets halen</label>
-      <label class="check"><input type="checkbox" data-action="toggle-prr" ${S.premiumRestToRandom ? 'checked' : ''}> Overschot uit premium sets ook naar random</label>
-    </fieldset>
-    <fieldset class="card"><legend>Bonus</legend>
+      <label class="check"><input type="checkbox" data-action="toggle-prr" ${S.premiumRestToRandom ? 'checked' : ''}> Overschot uit premium sets ook naar random</label>`)}
+    ${acc('bonus', 'Bonus', `extra blinkende kaart vanaf ${eur(S.bonusThreshold)}`, `
       <label class="field"><span>Extra blinkende kaart per bundel vanaf (€)</span>
-      <input class="input" type="number" min="0" data-setting="bonusThreshold" value="${S.bonusThreshold}"></label>
-    </fieldset>
-    <fieldset class="card"><legend>Back-up</legend>
-      <p class="muted small">Alles staat enkel op dit toestel. Maak geregeld een back-up.</p>
+      <input class="input" type="number" min="0" data-setting="bonusThreshold" value="${S.bonusThreshold}"></label>`)}
+    ${acc('backup', 'Back-up', 'alles staat enkel op dit toestel', `
+      <p class="muted small">Maak geregeld een back-up: zo raak je je voorraad, bundels en verkopen niet kwijt.</p>
       <div class="btn-row">
         <button class="btn" data-action="export">Back-up downloaden</button>
         <label class="btn">Back-up terugzetten<input type="file" accept=".json" data-input="restore" hidden></label>
-      </div>
-    </fieldset>
-    <fieldset class="card"><legend>Overige</legend>
+      </div>`)}
+    ${acc('wipe', 'Alles wissen', 'voorraad, bundels en verkopen', `
+      <p class="muted small">Wist alle gegevens van PokeBundels op dit toestel. Maak eerst een back-up als je iets wilt bewaren.</p>
+      <div class="btn-row"><button class="btn danger" data-action="wipe">Alle gegevens wissen</button></div>`)}
+    ${acc('about', 'Over PokeBundels', `versie ${VERSION}`, `
       <div class="btn-row">
+        <button class="btn" data-action="check-update">${icon('refresh', 18)} Zoek naar update</button>
         <button class="btn" data-action="refresh-setlist">Setlijst vernieuwen</button>
-        <button class="btn danger" data-action="wipe">Alles wissen</button>
       </div>
-      <p class="muted small">PokeBundels ${VERSION} · kaartgegevens via TCGdex</p>
-    </fieldset>`;
+      <p class="muted small">Kaartgegevens en afbeeldingen via TCGdex.</p>`)}
+    </div>`;
 }
 
 async function exportBackup() {
@@ -888,6 +953,7 @@ async function onClick(e) {
     case 'toggle-prr': state.settings.premiumRestToRandom = el.checked; await save.settings(); state.analysisCache = {}; break;
     case 'toggle-tfp': state.settings.themesFromPremium = el.checked; await save.settings(); state.analysisCache = {}; break;
     case 'export': await exportBackup(); break;
+    case 'check-update': await checkUpdate(); break;
     case 'refresh-setlist': try { state.setList = await listSets(true); toast('Setlijst vernieuwd.'); render(); } catch (err) { toast(err.message); } break;
     case 'wipe':
       if (confirm('Alle gegevens (voorraad, bundels, verkopen) wissen? Dit kan niet ongedaan worden.') && confirm('Echt zeker?')) {
@@ -936,9 +1002,20 @@ async function start() {
   await load();
   persist();
   render();
-  if ('serviceWorker' in navigator && location.protocol !== 'file:') {
-    navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' }).then((r) => r.update()).catch(() => {});
+  if (!state.setList.length) {
+    listSets().then((l) => { state.setList = l; if (state.view === 'set') render(); }).catch(() => {});
   }
+  $('#upd').addEventListener('click', () => { if (swWaiting) swWaiting.postMessage('skip'); else location.reload(); });
+  document.addEventListener('toggle', (e) => {
+    const d = e.target;
+    if (!d.dataset?.acc) return;
+    if (d.open) {
+      state.openAcc = d.dataset.id;
+      document.querySelectorAll(`details[data-acc="${d.dataset.acc}"][open]`).forEach((x) => { if (x !== d) x.open = false; });
+      setTimeout(() => { const r = d.getBoundingClientRect(); if (r.top < 0) window.scrollBy(0, r.top - 8); }, 0);
+    } else if (state.openAcc === d.dataset.id) state.openAcc = null;
+  }, true);
+  setupSW();
 }
 
 start();
