@@ -68,6 +68,50 @@ export function pickOne(pool, n, k, tiebreak) {
   return [...taken].map(([id, count]) => ({ id, count }));
 }
 
+/**
+ * Eén bundel voor een pakbon, met zo veel mogelijk variatie:
+ * willekeurige kaarten, en liefst geen kaarten die al in `avoid` zitten
+ * (bv. bundels van dezelfde set die nog niet verkocht zijn, voor kopers die er meerdere nemen).
+ * Voorwaarde: met wat overblijft moeten nog B-1 bundels te maken zijn, zodat je er geen verliest.
+ * cards: [{id,count}], avoid: Set van kaart-ids. Geeft [{id,count}] of null.
+ */
+export function pickVaried(cards, n, k, B, avoid = new Set(), rnd = Math.random) {
+  if (B <= 0) return null;
+  const base = cards.filter((c) => c.count > 0);
+  const r = new Map(base.map((c) => [c.id, rnd()]));
+  const av = (id) => (avoid.has(id) ? 1 : 0);
+  const fits = (bundle) => {
+    if (!bundle) return false;
+    const taken = new Map(bundle.map((x) => [x.id, x.count]));
+    const rest = base.map((c) => c.count - (taken.get(c.id) || 0));
+    return B - 1 === 0 || maxBundles(rest, n, k) >= B - 1;
+  };
+  // Vaste volgorde aflopen: k exemplaren per kaart zolang de bundel niet vol is.
+  const byOrder = (order) => {
+    const out = [];
+    let left = n;
+    for (const c of order) {
+      if (!left) break;
+      const t = Math.min(c.count, k, left);
+      if (t > 0) { out.push({ id: c.id, count: t }); left -= t; }
+    }
+    return left ? null : out;
+  };
+  const tries = [
+    // 1. volledig willekeurig, al gebruikte kaarten achteraan
+    () => byOrder([...base].sort((a, b) => av(a.id) - av(b.id) || r.get(a.id) - r.get(b.id))),
+    // 2. al gebruikte kaarten achteraan, daarna de grootste stapels eerst
+    () => byOrder([...base].sort((a, b) => av(a.id) - av(b.id) || b.count - a.count || r.get(a.id) - r.get(b.id))),
+    // 3. grootste stapels eerst (haalt altijd het maximum), bij gelijke stand variatie
+    () => pickOne(new Map(base.map((c) => [c.id, c.count])), n, k, (a, b) => av(a) - av(b) || r.get(a) - r.get(b)),
+  ];
+  for (const t of tries) {
+    const b = t();
+    if (fits(b)) return b;
+  }
+  return null;
+}
+
 /** Verdeel zo veel mogelijk bundels uit een lijst kaarten [{id,count}]. */
 export function allocate(cards, n, k, tiebreak) {
   const counts = cards.map((c) => c.count).filter((c) => c > 0);
@@ -129,7 +173,7 @@ export function analyse(cards, settings, k, setNames = {}) {
     const n = cfg.size - cfg.shiny;
     const { bundles, leftover } = allocate(pool, n, k, order);
     setRes[setId] = {
-      setId, name: setNames[setId] || setId, premium: isPrem, bundles,
+      setId, name: setNames[setId] || setId, premium: isPrem, bundles, pool,
       unique: pool.length, total: sum(pool), rest: sum(leftover),
       price: cfg.price, shiny: cfg.shiny, size: cfg.size,
     };
@@ -144,7 +188,7 @@ export function analyse(cards, settings, k, setNames = {}) {
   const randomCards = [...merged].map(([id, count]) => ({ id, count }));
   const rnd = allocate(randomCards, rb.size - rb.shiny, k, order);
   const randomRes = {
-    bundles: rnd.bundles, unique: randomCards.length, total: sum(randomCards), rest: sum(rnd.leftover),
+    bundles: rnd.bundles, pool: randomCards, unique: randomCards.length, total: sum(randomCards), rest: sum(rnd.leftover),
     price: rb.price, shiny: rb.shiny, size: rb.size,
     shinyBySet: {},
   };

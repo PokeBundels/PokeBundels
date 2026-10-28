@@ -3,10 +3,10 @@
 import { db, persist } from './db.js';
 import { listSets, getSet, imageUrl } from './tcgdex.js';
 import {
-  DEFAULT_SETTINGS, MODES, analyse, isNonShiny, normNr, parseImport,
+  DEFAULT_SETTINGS, MODES, analyse, isNonShiny, normNr, parseImport, pickVaried,
 } from './logic.js';
 
-const VERSION = '1.2.0';
+const VERSION = '1.2.1';
 const DAC7 = { sales: 30, revenue: 2000 };
 const PLATFORMS = ['Vinted', '2dehands', 'Anders'];
 
@@ -570,9 +570,17 @@ function bundleOptions(a) {
   return opts.sort((x, y) => rank[x.type] - rank[y.type] || x.label.localeCompare(y.label));
 }
 
-function firstBundle(a, type, ref) {
-  if (type === 'random') return a.random.bundles[0];
-  return a.sets[ref]?.bundles[0];
+// Pakbon met variatie: willekeurige kaarten, en zo weinig mogelijk overlap met
+// nog niet verkochte bundels van hetzelfde soort (koper die er meerdere neemt).
+function variedBundle(a, type, ref) {
+  const part = type === 'random' ? a.random : a.sets[ref];
+  if (!part?.bundles.length) return null;
+  const n = part.size - part.shiny;
+  const avoid = new Set();
+  for (const b of state.bundles) {
+    if (b.status === 'gemaakt' && b.type === type && b.ref === ref) for (const x of b.cards) avoid.add(x.id);
+  }
+  return pickVaried(part.pool, n, a.k, part.bundles.length, avoid) || part.bundles[0];
 }
 
 function renderBundles() {
@@ -622,8 +630,9 @@ function renderBundles() {
 
 function makeSheet(type, ref) {
   const a = getAnalysis(state.settings.activeMode);
-  const b = firstBundle(a, type, ref);
+  const b = variedBundle(a, type, ref);
   if (!b) { toast('Deze bundel is niet meer mogelijk.'); render(); return; }
+  state.pending = { type, ref, cards: b };
   const idx = cardIndex();
   const opt = bundleOptions(a).find((o) => o.type === type && o.ref === ref);
   const lines = b.map((x) => ({ ...idx.get(x.id), count: x.count }))
@@ -650,6 +659,8 @@ function makeSheet(type, ref) {
     <h2>${esc(opt.label)}</h2>
     <p class="muted small">${total} niet-blinkende kaarten + ${opt.shiny} holo/reverse · ${eur(opt.price)}</p>
     <div class="callout">${icon('spark', 18)} <span>${shinyText}</span></div>
+    <div class="btn-row"><button class="btn small" data-action="make" data-type="${type}" data-ref="${esc(ref)}">Andere mix</button>
+      <span class="muted small">Willekeurige kaarten, zo weinig mogelijk dezelfde als je andere klaargemaakte bundels.</span></div>
     <ul class="pick-list">${rows}</ul>
     <div class="btn-row sticky-actions">
       <button class="btn" data-action="close-sheet">Annuleren</button>
@@ -659,9 +670,11 @@ function makeSheet(type, ref) {
 
 async function confirmMake(type, ref) {
   const a = getAnalysis(state.settings.activeMode);
-  const b = firstBundle(a, type, ref);
+  const p = state.pending;
+  const b = p && p.type === type && p.ref === ref ? p.cards : null;
+  state.pending = null;
   const opt = bundleOptions(a).find((o) => o.type === type && o.ref === ref);
-  if (!b || !opt) { closeSheet(); toast('Deze bundel is niet meer mogelijk.'); render(); return; }
+  if (!b || !opt || b.some((x) => (state.inventory[x.id] || 0) < x.count)) { closeSheet(); toast('Deze bundel is niet meer mogelijk.'); render(); return; }
   for (const x of b) {
     const n = (state.inventory[x.id] || 0) - x.count;
     if (n > 0) state.inventory[x.id] = n; else delete state.inventory[x.id];
