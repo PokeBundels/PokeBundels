@@ -3,10 +3,10 @@
 import { db, persist } from './db.js';
 import { listSets, getSet, imageUrl } from './tcgdex.js';
 import {
-  THEMES, DEFAULT_SETTINGS, MODES, analyse, isNonShiny, themeOf, normNr, parseImport,
+  DEFAULT_SETTINGS, MODES, analyse, isNonShiny, normNr, parseImport,
 } from './logic.js';
 
-const VERSION = '1.1.0';
+const VERSION = '1.2.0';
 const DAC7 = { sales: 30, revenue: 2000 };
 const PLATFORMS = ['Vinted', '2dehands', 'Anders'];
 
@@ -40,9 +40,11 @@ async function load() {
     db.get('settings'), db.get('inventory'), db.get('bundles'), db.get('sales'),
   ]);
   state.settings = { ...structuredClone(DEFAULT_SETTINGS), ...(settings || {}) };
-  for (const k of ['setBundle', 'premiumBundle', 'themeBundle', 'randomBundle', 'themes']) {
+  for (const k of ['setBundle', 'premiumBundle', 'randomBundle']) {
     state.settings[k] = { ...DEFAULT_SETTINGS[k], ...(settings?.[k] || {}) };
   }
+  // instellingen van de vroegere themabundels opruimen
+  for (const k of ['themeBundle', 'themes', 'themesFromPremium']) delete state.settings[k];
   state.inventory = inventory || {};
   state.bundles = bundles || [];
   state.sales = sales || [];
@@ -123,6 +125,7 @@ let navPushed = false;
 let navSkip = false;
 function navRoot() { return $('#sheet').hidden && state.view === 'inv' && !state.invSet; }
 function navSync() {
+  if (navSkip) return; // er loopt nog een history.back(); popstate roept navSync opnieuw aan
   if (navRoot()) {
     if (navPushed) { navPushed = false; navSkip = true; history.back(); }
   } else if (!navPushed) {
@@ -136,7 +139,7 @@ function navBack() {
   if (state.view !== 'inv') { state.view = 'inv'; state.invSet = null; render(); window.scrollTo(0, 0); }
 }
 window.addEventListener('popstate', () => {
-  if (navSkip) { navSkip = false; return; }
+  if (navSkip) { navSkip = false; navSync(); return; }
   navPushed = false;
   navBack();
   setTimeout(navSync, 0);
@@ -295,13 +298,11 @@ function renderSetDetail(setId) {
 
 function tileHtml(c) {
   const n = state.inventory[c.id] || 0;
-  const th = themeOf(c);
   const img = imageUrl(c);
   return `
     <div class="tile ${n > 0 ? 'owned' : ''} ${isNonShiny(c) ? '' : 'shiny'}" data-card="${esc(c.id)}">
       <button class="tile-img" data-action="inc" data-card="${esc(c.id)}" aria-label="${esc(c.name)} +1">
         ${img ? `<img loading="lazy" src="${esc(img)}" alt="">` : `<span class="noimg">${esc(c.name)}</span>`}
-        ${th && isNonShiny(c) ? `<span class="tile-theme">${esc(THEMES[th].label.split(' ')[0])}</span>` : ''}
       </button>
       <div class="tile-meta"><span class="nr">#${esc(c.localId)}</span> <span class="nm">${esc(c.name)}</span></div>
       <div class="stepper">
@@ -510,10 +511,6 @@ function renderAnalysis() {
   const S = state.settings;
   const active = S.activeMode === k;
 
-  const themeRows = Object.values(a.themes).map((t) => `
-    <tr><td>${esc(t.label)}</td><td class="num">${t.unique}</td><td class="num">${t.total}</td>
-    <td class="num"><b>${t.bundles.length}</b></td><td class="num">${t.rest}</td></tr>`).join('');
-
   const setList = Object.values(a.sets).sort((x, y) => (y.premium - x.premium) || x.name.localeCompare(y.name));
   const setRows = setList.map((s) => `
     <tr><td>${esc(s.name)} ${s.premium ? '<span class="badge gold">P</span>' : ''}</td>
@@ -526,7 +523,7 @@ function renderAnalysis() {
   return `
     <header class="page-head">
       <h1>Bundelvoorstel</h1>
-      <p class="muted small">Eerst thema's, dan sets, de rest gaat naar random. ${S.themesFromPremium ? '' : 'Themakaarten uit premium sets blijven in hun set.'}</p>
+      <p class="muted small">Zoveel mogelijk bundels per set, de rest gaat naar random.</p>
     </header>
     <div class="segs" role="tablist">${tabs}</div>
     <div class="stats">
@@ -538,12 +535,6 @@ function renderAnalysis() {
       ${active ? `<span class="pill ok">${icon('check', 16)} Actief plan</span>` : `<button class="btn primary" data-action="use-plan" data-k="${k}">Gebruik dit plan</button>`}
       <button class="btn" data-action="reanalyse">${icon('refresh', 18)} Heranalyseren</button>
     </div>
-
-    <section class="card">
-      <h2>Thema's <span class="muted small">(${S.themeBundle.size} kaarten · ${eur(S.themeBundle.price)})</span></h2>
-      ${themeRows ? `<table class="tbl"><thead><tr><th>Thema</th><th class="num">Uniek</th><th class="num">Kaarten</th><th class="num">Bundels</th><th class="num">Rest</th></tr></thead><tbody>${themeRows}</tbody></table>` : '<p class="muted">Geen thema\'s actief.</p>'}
-      ${a.summary.themeShiny ? `<p class="small">${icon('spark', 14)} ${a.summary.themeShiny} holo/reverse nodig, liefst van het thema.</p>` : ''}
-    </section>
 
     <section class="card">
       <h2>Sets <span class="muted small">(${S.setBundle.size} kaarten · ${eur(S.setBundle.price)} / premium ${eur(S.premiumBundle.price)})</span></h2>
@@ -572,19 +563,14 @@ function bundleOptions(a) {
     if (!s.bundles.length) continue;
     opts.push({ type: s.premium ? 'premium' : 'set', ref: s.setId, label: s.name, sub: `${s.size} kaarten · ${s.shiny} holo/reverse uit deze set`, price: s.price, n: s.bundles.length, shinySet: s.setId, shiny: s.shiny });
   }
-  for (const t of Object.values(a.themes)) {
-    if (!t.bundles.length) continue;
-    opts.push({ type: 'theme', ref: t.key, label: t.label, sub: `${t.size} kaarten · ${t.shiny} holo/reverse (liefst van het thema)`, price: t.price, n: t.bundles.length, shiny: t.shiny });
-  }
   if (a.random.bundles.length) {
     opts.push({ type: 'random', ref: 'random', label: 'Random pick', sub: `${S.randomBundle.size} kaarten · ${S.randomBundle.shiny} holo/reverse uit gewone sets`, price: a.random.price, n: a.random.bundles.length, shiny: a.random.shiny });
   }
-  const rank = { premium: 0, set: 1, theme: 2, random: 3 };
+  const rank = { premium: 0, set: 1, random: 2 };
   return opts.sort((x, y) => rank[x.type] - rank[y.type] || x.label.localeCompare(y.label));
 }
 
 function firstBundle(a, type, ref) {
-  if (type === 'theme') return a.themes[ref]?.bundles[0];
   if (type === 'random') return a.random.bundles[0];
   return a.sets[ref]?.bundles[0];
 }
@@ -594,7 +580,7 @@ function renderBundles() {
   const mode = MODES.find((m) => m.k === k);
   const a = getAnalysis(k);
   const opts = bundleOptions(a);
-  const groups = { premium: 'Premium sets', set: 'Sets', theme: "Thema's", random: 'Random' };
+  const groups = { premium: 'Premium sets', set: 'Sets', random: 'Random' };
   let last = null;
   const optHtml = opts.map((o) => {
     const head = o.type !== last ? `<h3 class="group">${groups[o.type]}</h3>` : '';
@@ -655,7 +641,6 @@ function makeSheet(type, ref) {
   }).join('');
   let shinyText = '';
   if (type === 'set' || type === 'premium') shinyText = `Neem <b>${opt.shiny} holo/reverse uit ${esc(opt.label)}</b> uit je map.`;
-  else if (type === 'theme') shinyText = `Neem <b>${opt.shiny} holo/reverse</b>, liefst van het thema ${esc(opt.label)}.`;
   else {
     const sets = Object.keys(a.random.shinyBySet).map((s) => state.sets[s]?.name || s).join(', ');
     shinyText = `Neem <b>${opt.shiny} holo/reverse uit gewone sets</b>${sets ? ` (bv. ${esc(sets)})` : ''}.`;
@@ -816,20 +801,15 @@ function renderSettings() {
       <div><div class="prem-name">${esc(setName(id))}</div><div class="muted small">${esc(id)}</div></div>
       <button class="btn ghost small danger" data-action="remove-premium" data-set="${esc(id)}" aria-label="${esc(setName(id))} verwijderen als premium set">Verwijderen</button>
     </div>`).join('') || '<p class="muted small">Geen premium sets.</p>';
-  const themeOpts = Object.entries(THEMES).map(([key, t]) => `
-    <label class="check"><input type="checkbox" data-action="toggle-theme" data-key="${key}" ${S.themes[key] ? 'checked' : ''}> ${esc(t.label)}</label>`).join('');
-  const themeOn = Object.entries(THEMES).filter(([k]) => S.themes[k]).map(([, t]) => t.label.split(' ')[0]);
   return `
     <header class="page-head"><h1>Instellingen</h1></header>
     <div class="accs">
-    ${acc('bundles', 'Bundels', `${eur(S.setBundle.price)} · ${eur(S.premiumBundle.price)} · ${eur(S.themeBundle.price)} · ${eur(S.randomBundle.price)}`,
-      bundleField('setBundle', 'Bundel per set') + bundleField('premiumBundle', 'Premium set') + bundleField('themeBundle', 'Themaset') + bundleField('randomBundle', 'Random pick'))}
+    ${acc('bundles', 'Bundels', `${eur(S.setBundle.price)} · ${eur(S.premiumBundle.price)} · ${eur(S.randomBundle.price)}`,
+      bundleField('setBundle', 'Bundel per set') + bundleField('premiumBundle', 'Premium set') + bundleField('randomBundle', 'Random pick'))}
     ${acc('premium', 'Premium sets', S.premiumSets.map(setName).join(' · ') || 'geen', `
       <p class="muted small">Bundels uit deze sets krijgen de premiumprijs.</p>
       ${premiumOpts}
-      <div class="btn-row"><button class="btn small" data-action="add-premium">${icon('plus', 16)} Premium set toevoegen</button></div>`)}
-    ${acc('themes', "Thema's", themeOn.join(' · ') || 'uit', `${themeOpts}
-      <label class="check"><input type="checkbox" data-action="toggle-tfp" ${S.themesFromPremium ? 'checked' : ''}> Themakaarten ook uit premium sets halen</label>
+      <div class="btn-row"><button class="btn small" data-action="add-premium">${icon('plus', 16)} Premium set toevoegen</button></div>
       <label class="check"><input type="checkbox" data-action="toggle-prr" ${S.premiumRestToRandom ? 'checked' : ''}> Overschot uit premium sets ook naar random</label>`)}
     ${acc('bonus', 'Bonus', `extra blinkende kaart vanaf ${eur(S.bonusThreshold)}`, `
       <label class="field"><span>Extra blinkende kaart per bundel vanaf (€)</span>
@@ -949,9 +929,7 @@ async function onClick(e) {
     case 'sell': sellSheet(); break;
     case 'confirm-sell': await confirmSell(); break;
     case 'undo-sale': await undoSale(el.dataset.id); break;
-    case 'toggle-theme': state.settings.themes[el.dataset.key] = el.checked; await save.settings(); state.analysisCache = {}; break;
     case 'toggle-prr': state.settings.premiumRestToRandom = el.checked; await save.settings(); state.analysisCache = {}; break;
-    case 'toggle-tfp': state.settings.themesFromPremium = el.checked; await save.settings(); state.analysisCache = {}; break;
     case 'export': await exportBackup(); break;
     case 'check-update': await checkUpdate(); break;
     case 'refresh-setlist': try { state.setList = await listSets(true); toast('Setlijst vernieuwd.'); render(); } catch (err) { toast(err.message); } break;

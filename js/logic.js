@@ -1,42 +1,10 @@
 // PokeBundels — pure rekenlogica (geen DOM, testbaar in Node)
 
-export const THEMES = {
-  eevee: {
-    label: 'Eevee & Eeveelutions',
-    names: ['Eevee', 'Vaporeon', 'Jolteon', 'Flareon', 'Espeon', 'Umbreon', 'Leafeon', 'Glaceon', 'Sylveon'],
-  },
-  pika: {
-    label: 'Pika-familie',
-    names: ['Pichu', 'Pikachu', 'Raichu'],
-  },
-  starters: {
-    label: 'Starters',
-    names: [
-      'Bulbasaur', 'Ivysaur', 'Venusaur', 'Charmander', 'Charmeleon', 'Charizard', 'Squirtle', 'Wartortle', 'Blastoise',
-      'Chikorita', 'Bayleef', 'Meganium', 'Cyndaquil', 'Quilava', 'Typhlosion', 'Totodile', 'Croconaw', 'Feraligatr',
-      'Treecko', 'Grovyle', 'Sceptile', 'Torchic', 'Combusken', 'Blaziken', 'Mudkip', 'Marshtomp', 'Swampert',
-      'Turtwig', 'Grotle', 'Torterra', 'Chimchar', 'Monferno', 'Infernape', 'Piplup', 'Prinplup', 'Empoleon',
-      'Snivy', 'Servine', 'Serperior', 'Tepig', 'Pignite', 'Emboar', 'Oshawott', 'Dewott', 'Samurott',
-      'Chespin', 'Quilladin', 'Chesnaught', 'Fennekin', 'Braixen', 'Delphox', 'Froakie', 'Frogadier', 'Greninja',
-      'Rowlet', 'Dartrix', 'Decidueye', 'Litten', 'Torracat', 'Incineroar', 'Popplio', 'Brionne', 'Primarina',
-      'Grookey', 'Thwackey', 'Rillaboom', 'Scorbunny', 'Raboot', 'Cinderace', 'Sobble', 'Drizzile', 'Inteleon',
-      'Sprigatito', 'Floragato', 'Meowscarada', 'Fuecoco', 'Crocalor', 'Skeledirge', 'Quaxly', 'Quaxwell', 'Quaquaval',
-    ],
-  },
-};
-
-const THEME_REGEX = Object.fromEntries(
-  Object.entries(THEMES).map(([key, t]) => [key, new RegExp(`\\b(${t.names.join('|')})\\b`, 'i')])
-);
-
 export const DEFAULT_SETTINGS = {
   premiumSets: ['sv03.5', 'sv08.5', 'sv10'],
   setBundle: { size: 50, shiny: 5, price: 5 },
   premiumBundle: { size: 50, shiny: 5, price: 7.5 },
-  themeBundle: { size: 20, shiny: 2, price: 5 },
   randomBundle: { size: 50, shiny: 5, price: 4.5 },
-  themes: { eevee: true, pika: true, starters: true },
-  themesFromPremium: false,
   premiumRestToRandom: false,
   activeMode: 1,
   bonusThreshold: 25,
@@ -53,17 +21,6 @@ export const MODES = [
 export function isNonShiny(card) {
   const r = (card.rarity || '').toLowerCase();
   return r === 'common' || r === 'uncommon';
-}
-
-/** Thema van een kaart, of null. Alleen Pokémon-kaarten tellen (geen trainers als "Eevee Bag"). */
-export function themeOf(card) {
-  if (!card || !card.name) return null;
-  const cat = (card.category || '').toLowerCase();
-  if (cat && !cat.startsWith('pok')) return null;
-  for (const key of Object.keys(THEMES)) {
-    if (THEME_REGEX[key].test(card.name)) return key;
-  }
-  return null;
 }
 
 /**
@@ -151,17 +108,8 @@ export function analyse(cards, settings, k, setNames = {}) {
     return String(A.localId).localeCompare(String(Bc.localId), undefined, { numeric: true });
   };
 
-  const themePools = {};
   const setPools = {};
-  for (const c of eligible) {
-    const t = themeOf(c);
-    const isPrem = premium.has(c.setId);
-    if (t && settings.themes?.[t] && (!isPrem || settings.themesFromPremium)) {
-      (themePools[t] ||= []).push({ id: c.id, count: c.count });
-    } else {
-      (setPools[c.setId] ||= []).push({ id: c.id, count: c.count });
-    }
-  }
+  for (const c of eligible) (setPools[c.setId] ||= []).push({ id: c.id, count: c.count });
 
   const randomPool = [];
   const premiumRest = [];
@@ -173,23 +121,7 @@ export function analyse(cards, settings, k, setNames = {}) {
     }
   };
 
-  // 1. Thema's
-  const themeRes = {};
-  const tb = settings.themeBundle;
-  for (const key of Object.keys(THEMES)) {
-    if (!settings.themes?.[key]) continue;
-    const pool = themePools[key] || [];
-    const n = tb.size - tb.shiny;
-    const { bundles, leftover } = allocate(pool, n, k, order);
-    themeRes[key] = {
-      key, label: THEMES[key].label, bundles,
-      unique: pool.length, total: sum(pool), rest: sum(leftover),
-      price: tb.price, shiny: tb.shiny, size: tb.size,
-    };
-    pushRest(leftover);
-  }
-
-  // 2. Sets
+  // 1. Sets
   const setRes = {};
   for (const [setId, pool] of Object.entries(setPools)) {
     const isPrem = premium.has(setId);
@@ -204,7 +136,7 @@ export function analyse(cards, settings, k, setNames = {}) {
     pushRest(leftover);
   }
 
-  // 3. Random (overschot uit gewone sets)
+  // 2. Random (overschot uit gewone sets)
   const rb = settings.randomBundle;
   // zelfde kaart kan uit meerdere restlijsten komen → samenvoegen
   const merged = new Map();
@@ -231,22 +163,16 @@ export function analyse(cards, settings, k, setNames = {}) {
     bundleCount += s.bundles.length;
     revenue += s.bundles.length * s.price;
   }
-  let themeShiny = 0;
-  for (const t of Object.values(themeRes)) {
-    themeShiny += t.bundles.length * t.shiny;
-    bundleCount += t.bundles.length;
-    revenue += t.bundles.length * t.price;
-  }
   const randomShiny = rnd.bundles.length * rb.shiny;
   bundleCount += rnd.bundles.length;
   revenue += rnd.bundles.length * rb.price;
 
   return {
-    k, sets: setRes, themes: themeRes, random: randomRes,
+    k, sets: setRes, random: randomRes,
     premiumRest: sum(premiumRest),
     summary: {
-      bundleCount, revenue, shinyNeed, themeShiny, randomShiny,
-      shinyTotal: Object.values(shinyNeed).reduce((a, c) => a + c, 0) + themeShiny + randomShiny,
+      bundleCount, revenue, shinyNeed, randomShiny,
+      shinyTotal: Object.values(shinyNeed).reduce((a, c) => a + c, 0) + randomShiny,
     },
   };
 }

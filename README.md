@@ -18,7 +18,7 @@ Updates: overschrijf de bestanden in de repository. Verhoog dan ook `VERSION` in
 2. **Kaarten toevoegen**
    - Met de knoppen − / + of door op een kaart te tikken, of
    - via Claude: tik in een set op **Prompt voor Claude**, plak die prompt in een chat met Claude samen met je foto's, en plak de JSON die je terugkrijgt bij **Importeren**. Pas daarna de aantallen aan.
-3. **Analyse**: drie tabbladen (geen dubbels, max. 2×, max. 5×). Volgorde: eerst thema's (Eevee, Pika-familie, starters), dan setbundels, de rest gaat naar random. Kies **Gebruik dit plan**.
+3. **Analyse**: drie tabbladen (geen dubbels, max. 2×, max. 5×). Per set zoveel mogelijk bundels, de rest gaat naar random. Kies **Gebruik dit plan**.
 4. **Bundels**: tik **Maak** voor een pakbon met exact welke kaarten erin moeten, plus hoeveel holo/reverse je uit je map neemt. Na **Bundel gemaakt** gaan de kaarten uit de voorraad. Met **Terug** gaan ze er weer in.
 5. **Verkoop**: selecteer gemaakte bundels, registreer platform en bedrag. De app houdt per platform de DAC7-teller bij (30 verkopen of €2.000 per jaar). Bij een verkoop vanaf €25 krijg je een herinnering voor de extra blinkende kaart per bundel.
 
