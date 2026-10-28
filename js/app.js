@@ -6,7 +6,7 @@ import {
   THEMES, DEFAULT_SETTINGS, MODES, analyse, isNonShiny, themeOf, normNr, parseImport,
 } from './logic.js';
 
-const VERSION = '1.0.2';
+const VERSION = '1.0.3';
 const DAC7 = { sales: 30, revenue: 2000 };
 const PLATFORMS = ['Vinted', '2dehands', 'Anders'];
 
@@ -172,6 +172,7 @@ function renderInventory() {
     <header class="page-head">
       <h1>Inventaris</h1>
       <p class="muted">Niet-blinkende kaarten (common/uncommon) per set.</p>
+      <p class="badge gold">TEST · versie ${VERSION}</p>
     </header>
     <div class="stats">
       <div class="stat"><b>${total}</b><span>kaarten</span></div>
