@@ -6,7 +6,7 @@ import {
   THEMES, DEFAULT_SETTINGS, MODES, analyse, isNonShiny, themeOf, normNr, parseImport,
 } from './logic.js';
 
-const VERSION = '1.0.0';
+const VERSION = '1.0.2';
 const DAC7 = { sales: 30, revenue: 2000 };
 const PLATFORMS = ['Vinted', '2dehands', 'Anders'];
 
@@ -16,6 +16,7 @@ const state = {
   bundles: [],        // gemaakte/verkochte bundels
   sales: [],
   sets: {},           // setId -> setgegevens (uit cache)
+  setList: [],        // alle beschikbare sets (namen)
   view: 'inv',
   invSet: null,
   invFilter: { all: false, owned: false, q: '' },
@@ -45,6 +46,7 @@ async function load() {
   state.bundles = bundles || [];
   state.sales = sales || [];
   state.mode = state.settings.activeMode || 1;
+  state.setList = (await db.get('setlist'))?.sets || [];
   for (const id of state.settings.mySets) {
     const s = await db.get(`set:${id}`);
     if (s) state.sets[id] = s;
@@ -266,31 +268,72 @@ function setCount(cardId, n) {
   }
 }
 
-async function addSetFlow() {
-  openSheet(`<h2>Set toevoegen</h2><p class="muted">Sets laden…</p>`);
+function setName(id) {
+  return state.sets[id]?.name || state.setList.find((s) => s.id === id)?.name || id;
+}
+
+/** Setkiezer. purpose: 'inv' (set toevoegen aan inventaris) of 'premium' (premium set aanduiden). */
+async function addSetFlow(purpose = 'inv') {
+  const title = purpose === 'premium' ? 'Premium set toevoegen' : 'Set toevoegen';
+  openSheet(`<h2>${title}</h2><p class="muted">Sets laden…</p>`);
   let sets;
-  try { sets = await listSets(); } catch (e) {
-    openSheet(`<h2>Set toevoegen</h2><p class="error">Kon de setlijst niet laden: ${esc(e.message)}</p>
+  try { sets = await listSets(); state.setList = sets; } catch (e) {
+    openSheet(`<h2>${title}</h2><p class="error">Kon de setlijst niet laden: ${esc(e.message)}</p>
       <label class="field"><span>Set-ID (bv. sv08)</span><input class="input" id="manual-set"></label>
-      <div class="btn-row"><button class="btn primary" data-action="add-set-id">Toevoegen</button></div>`);
+      <div class="btn-row"><button class="btn primary" data-action="add-set-id" data-purpose="${purpose}">Toevoegen</button></div>`);
     return;
   }
-  const html = (q = '') => sets
-    .filter((s) => !q || s.name.toLowerCase().includes(q) || s.id.toLowerCase().includes(q))
-    .map((s) => `<button class="set-pick ${state.settings.mySets.includes(s.id) ? 'have' : ''}" data-action="pick-set" data-set="${esc(s.id)}">
-      <span>${esc(s.name)}</span><span class="muted small">${esc(s.id)} · ${esc(s.serie)}</span></button>`).join('');
+  const act = purpose === 'premium' ? 'pick-premium' : 'pick-set';
+  const marked = (id) => (purpose === 'premium' ? isPremium(id) : state.settings.mySets.includes(id));
+  const markText = purpose === 'premium' ? 'Premium' : 'In inventaris';
+  const item = (s) => `
+    <button class="set-pick ${marked(s.id) ? 'have' : ''}" data-action="${act}" data-set="${esc(s.id)}">
+      <span class="set-pick-main"><span class="set-pick-name">${esc(s.name)}</span><span class="muted small">${esc(s.id)}</span></span>
+      ${marked(s.id) ? `<span class="badge gold">${markText}</span>` : ''}
+    </button>`;
+  const grouped = (list) => {
+    const out = [];
+    let serie = null;
+    for (const s of list) {
+      if (s.serie !== serie) { serie = s.serie; out.push(`<div class="set-pick-head">${esc(serie)}</div>`); }
+      out.push(item(s));
+    }
+    return out.join('');
+  };
+  const html = (q, all) => {
+    if (!q && !all) {
+      return `<p class="muted small">Typ een setnaam of set-ID (bv. "surging" of "sv08").</p>
+        <button class="btn" data-action="show-all-sets">Alle sets tonen (${sets.length})</button>`;
+    }
+    const list = q ? sets.filter((s) => s.name.toLowerCase().includes(q) || s.id.toLowerCase().includes(q)) : sets;
+    return list.length ? grouped(list) : '<p class="muted">Geen set gevonden.</p>';
+  };
   openSheet(`
-    <h2>Set toevoegen</h2>
-    <input class="input" type="search" placeholder="Zoek set" id="set-search" aria-label="Zoek set">
-    <div class="set-pick-list" id="set-pick-list">${html()}</div>
+    <h2>${title}</h2>
+    <input class="input" type="search" placeholder="Zoek set" id="set-search" aria-label="Zoek set" autocomplete="off">
+    <div class="set-pick-list" id="set-pick-list">${html('', false)}</div>
     <details class="small"><summary>Set niet in de lijst?</summary>
       <label class="field"><span>Set-ID (bv. sv08)</span><input class="input" id="manual-set"></label>
-      <button class="btn small" data-action="add-set-id">Toevoegen</button>
+      <button class="btn small" data-action="add-set-id" data-purpose="${purpose}">Toevoegen</button>
     </details>`, (el) => {
-    el.querySelector('#set-search').addEventListener('input', (e) => {
-      el.querySelector('#set-pick-list').innerHTML = html(e.target.value.trim().toLowerCase());
+    const box = el.querySelector('#set-pick-list');
+    const input = el.querySelector('#set-search');
+    input.addEventListener('input', () => { box.innerHTML = html(input.value.trim().toLowerCase(), false); });
+    box.addEventListener('click', (e) => {
+      if (e.target.closest('[data-action="show-all-sets"]')) {
+        e.stopPropagation();
+        box.innerHTML = html('', true);
+      }
     });
+    setTimeout(() => input.focus(), 50);
   });
+}
+
+async function togglePremium(id, on) {
+  const list = state.settings.premiumSets;
+  state.settings.premiumSets = on ? [...new Set([...list, id])] : list.filter((x) => x !== id);
+  state.analysisCache = {};
+  await save.settings();
 }
 
 async function loadSet(setId, { force = false, open = true } = {}) {
@@ -415,7 +458,7 @@ function renderAnalysis() {
     <td class="num"><b>${s.bundles.length}</b></td><td class="num">${s.rest}</td></tr>`).join('');
 
   const shinyRows = Object.entries(a.summary.shinyNeed).map(([id, n]) =>
-    `<li><span>${esc(state.sets[id]?.name || id)}</span><b>${n}</b></li>`).join('');
+    `<li><span>${esc(setName(id))}</span><b>${n}</b></li>`).join('');
 
   return `
     <header class="page-head">
@@ -701,9 +744,11 @@ function renderSettings() {
         <label class="field"><span>Prijs (€)</span><input class="input" type="number" min="0" step="0.5" data-setting="${key}.price" value="${S[key].price}"></label>
       </div>
     </fieldset>`;
-  const premiumOpts = [...new Set([...S.premiumSets, ...S.mySets])].map((id) => `
-    <label class="check"><input type="checkbox" data-action="toggle-premium" data-set="${esc(id)}" ${S.premiumSets.includes(id) ? 'checked' : ''}>
-    ${esc(state.sets[id]?.name || id)} <span class="muted small">${esc(id)}</span></label>`).join('');
+  const premiumOpts = S.premiumSets.map((id) => `
+    <div class="prem-row">
+      <div><div class="prem-name">${esc(setName(id))}</div><div class="muted small">${esc(id)}</div></div>
+      <button class="btn ghost small danger" data-action="remove-premium" data-set="${esc(id)}" aria-label="${esc(setName(id))} verwijderen als premium set">Verwijderen</button>
+    </div>`).join('') || '<p class="muted small">Geen premium sets.</p>';
   const themeOpts = Object.entries(THEMES).map(([key, t]) => `
     <label class="check"><input type="checkbox" data-action="toggle-theme" data-key="${key}" ${S.themes[key] ? 'checked' : ''}> ${esc(t.label)}</label>`).join('');
   return `
@@ -712,7 +757,11 @@ function renderSettings() {
     ${bundleField('premiumBundle', 'Premium set')}
     ${bundleField('themeBundle', 'Themaset')}
     ${bundleField('randomBundle', 'Random pick')}
-    <fieldset class="card"><legend>Premium sets</legend>${premiumOpts}</fieldset>
+    <fieldset class="card"><legend>Premium sets</legend>
+      <p class="muted small">Bundels uit deze sets krijgen de premiumprijs.</p>
+      ${premiumOpts}
+      <div class="btn-row"><button class="btn small" data-action="add-premium">${icon('plus', 16)} Premium set toevoegen</button></div>
+    </fieldset>
     <fieldset class="card"><legend>Thema's</legend>${themeOpts}
       <label class="check"><input type="checkbox" data-action="toggle-tfp" ${S.themesFromPremium ? 'checked' : ''}> Themakaarten ook uit premium sets halen</label>
       <label class="check"><input type="checkbox" data-action="toggle-prr" ${S.premiumRestToRandom ? 'checked' : ''}> Overschot uit premium sets ook naar random</label>
@@ -778,9 +827,17 @@ async function onClick(e) {
   switch (act) {
     case 'nav': state.view = el.dataset.view; if (state.view === 'inv') state.invSet = null; render(); window.scrollTo(0, 0); break;
     case 'close-sheet': closeSheet(); break;
-    case 'add-set': addSetFlow(); break;
+    case 'add-set': addSetFlow('inv'); break;
+    case 'add-premium': addSetFlow('premium'); break;
     case 'pick-set': await loadSet(el.dataset.set); break;
-    case 'add-set-id': { const v = $('#manual-set')?.value.trim(); if (v) await loadSet(v); break; }
+    case 'pick-premium': await togglePremium(el.dataset.set, true); closeSheet(); render(); toast(`${setName(el.dataset.set)} is nu een premium set.`); break;
+    case 'remove-premium': await togglePremium(el.dataset.set, false); render(); break;
+    case 'add-set-id': {
+      const v = $('#manual-set')?.value.trim();
+      if (!v) break;
+      if (el.dataset.purpose === 'premium') { await togglePremium(v, true); closeSheet(); render(); } else await loadSet(v);
+      break;
+    }
     case 'open-set': state.invSet = el.dataset.set; render(); window.scrollTo(0, 0); break;
     case 'close-set': state.invSet = null; render(); break;
     case 'flt-all': state.invFilter.all = el.dataset.val === '1'; render(); break;
@@ -826,18 +883,11 @@ async function onClick(e) {
     case 'sell': sellSheet(); break;
     case 'confirm-sell': await confirmSell(); break;
     case 'undo-sale': await undoSale(el.dataset.id); break;
-    case 'toggle-premium': {
-      const id = el.dataset.set;
-      const list = state.settings.premiumSets;
-      state.settings.premiumSets = el.checked ? [...new Set([...list, id])] : list.filter((x) => x !== id);
-      await save.settings(); state.analysisCache = {};
-      break;
-    }
     case 'toggle-theme': state.settings.themes[el.dataset.key] = el.checked; await save.settings(); state.analysisCache = {}; break;
     case 'toggle-prr': state.settings.premiumRestToRandom = el.checked; await save.settings(); state.analysisCache = {}; break;
     case 'toggle-tfp': state.settings.themesFromPremium = el.checked; await save.settings(); state.analysisCache = {}; break;
     case 'export': await exportBackup(); break;
-    case 'refresh-setlist': try { await listSets(true); toast('Setlijst vernieuwd.'); } catch (err) { toast(err.message); } break;
+    case 'refresh-setlist': try { state.setList = await listSets(true); toast('Setlijst vernieuwd.'); render(); } catch (err) { toast(err.message); } break;
     case 'wipe':
       if (confirm('Alle gegevens (voorraad, bundels, verkopen) wissen? Dit kan niet ongedaan worden.') && confirm('Echt zeker?')) {
         await db.clear(); location.reload();

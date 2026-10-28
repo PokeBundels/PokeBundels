@@ -221,8 +221,15 @@ legend { padding: 0 6px; font-weight: 700; font-family: 'Bricolage Grotesque', s
 .sheet h2 { font-size: 22px; padding-right: 52px; min-height: 44px; display: flex; align-items: center; }
 .sheet-close { position: sticky; float: right; top: 0; margin: -4px -4px 0 8px; z-index: 2; }
 .set-pick-list { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; max-height: 56vh; overflow-y: auto; }
-.set-pick { display: flex; flex-direction: column; align-items: flex-start; text-align: left; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); color: var(--text); font: inherit; cursor: pointer; min-height: 44px; }
+.set-pick { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 10px; text-align: left; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); color: var(--text); font: inherit; cursor: pointer; min-height: 56px; }
+.set-pick:hover { background: var(--surface-2); }
 .set-pick.have { border-color: var(--accent); }
+.set-pick-main { display: flex; flex-direction: column; min-width: 0; }
+.set-pick-name { font-weight: 700; }
+.set-pick-head { flex: none; font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); font-weight: 700; padding: 12px 2px 2px; }
+.set-pick-list > .btn { align-self: flex-start; }
+.prem-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.prem-name { font-weight: 700; }
 details { margin: 10px 0; }
 summary { cursor: pointer; color: var(--muted); min-height: 32px; }
 

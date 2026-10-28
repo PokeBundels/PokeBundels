@@ -1,5 +1,5 @@
 // PokeBundels service worker — app offline beschikbaar, kaartafbeeldingen gecachet
-const VERSION = 'pb-1.0.1';
+const VERSION = 'pb-1.0.2';
 const SHELL = [
   './', './index.html', './styles.css', './manifest.webmanifest',
   './js/app.js', './js/logic.js', './js/db.js', './js/tcgdex.js',
