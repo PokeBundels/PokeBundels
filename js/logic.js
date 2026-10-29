@@ -1,6 +1,7 @@
 // PokeBundels — pure rekenlogica (geen DOM, testbaar in Node)
 
-// Standaardteksten voor zoekertjes. {cu} = gewone kaarten + energy samen. Invulvelden: {naam} {kaarten} {cu} {holo} {energy} {extras} {set} {prijs}
+// Standaardteksten voor zoekertjes. {naam} = naam gekozen bij Maak (standaard de naam uit Instellingen),
+// {pokemon} = gekozen Pokémon bij Maak. {cu} = gewone kaarten + energy samen. Invulvelden: {naam} {kaarten} {cu} {holo} {energy} {extras} {set} {prijs}
 // {hashtag} {hashtagsoort} {hashtagset} {zoekwoorden}. Een regel waarin een invulveld leeg of 0 is, valt weg.
 export const TEMPLATES = {
   tinTitle: '{naam} met {kaarten} Pokémon kaarten ({set})',
@@ -8,6 +9,7 @@ export const TEMPLATES = {
     '{naam} gevuld met {kaarten} Engelse Pokémon kaarten uit {set}.',
     '• {cu} gewone kaarten',
     '• {holo} blinkende kaarten (holo/reverse)',
+    '• Met o.a. {pokemon}',
     '• Extra: {extras}',
     'Geen dubbels in de tin.',
     '',
@@ -23,6 +25,7 @@ export const TEMPLATES = {
     'Setje van {kaarten} Engelse Pokémon kaarten uit {set}.',
     '• {cu} gewone kaarten',
     '• {holo} blinkende kaarten (holo/reverse)',
+    '• Met o.a. {pokemon}',
     '• Extra: {extras}',
     'Geen dubbels in het setje.',
     '',
@@ -64,7 +67,7 @@ export function defaultPacks() {
 export const DEFAULT_SETTINGS = {
   packs: defaultPacks(),
   activeMode: 1,
-  packsVersion: 3,
+  packsVersion: 4,
   hashtag: 'pokebundelsbe',
   keywords: 'pokemon pokémon pokemonkaarten pokemoncards kaarten scarlet violet cadeau cadeautje cadeautip verjaardag verjaardagscadeau sinterklaas kerst verzamelen setje bundel tradingcards tcg',
   mySets: [],
@@ -108,6 +111,16 @@ export function migrateSettings(saved) {
       if (oldPrice[p.id] !== undefined && p.price === oldPrice[p.id]) p.price = oldPrice[p.id] - 0.5;
     }
     out.packsVersion = 3;
+  }
+  if ((saved?.packsVersion || 0) < 4) {
+    // regel voor gekozen Pokémon toevoegen onder de blinkende kaarten
+    for (const p of out.packs) {
+      const lines = String(p.text || '').split('\n');
+      if (lines.some((l) => l.includes('{pokemon}'))) continue;
+      const i = lines.findIndex((l) => l.includes('{holo}'));
+      if (i >= 0) { lines.splice(i + 1, 0, '• Met o.a. {pokemon}'); p.text = lines.join('\n'); }
+    }
+    out.packsVersion = 4;
   }
   for (const k of ['bonusThreshold', 'setBundle', 'randomBundle', 'tins', 'themeBundle', 'themes', 'themesFromPremium', 'premiumSets', 'premiumBundle', 'premiumRestToRandom']) delete out[k];
   return out;

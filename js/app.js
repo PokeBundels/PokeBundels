@@ -6,7 +6,7 @@ import {
   MODES, TEMPLATES, analysePlan, defaultPacks, migrateSettings, parseExtras, isNonShiny, isNonHoloRare, isBundleCard, normNr, parseImport, pickVaried,
 } from './logic.js';
 
-const VERSION = '2.3.0';
+const VERSION = '2.4.0';
 const DAC7 = { sales: 30, revenue: 2000 };
 const PLATFORMS = ['Vinted', '2dehands', 'Anders'];
 
@@ -33,6 +33,7 @@ const state = {
   sub: { ana: 'overzicht', prep: 'tins' }, // subtabbladen
   openPack: null,     // opengeklapte tin/bundel in Instellingen
   must: [],           // specifieke Pokémon bij Maak: [{name, n}]
+  makeName: '',       // eigen naam voor deze tin/bundel bij Maak
   openEras: loadOpenEras(), // opengeklapte era's in Inventaris
   invVersion: 0,
   analysisCache: {},
@@ -741,6 +742,7 @@ function mustMatches(unit, name, idx) {
 function forcedPick(unit, k, idx, avoid) {
   const used = new Map();
   const notes = [];
+  const gotList = [];
   let room = unit.n;
   for (const m of state.must) {
     const want = Math.max(0, Math.round(m.n || 0));
@@ -759,8 +761,9 @@ function forcedPick(unit, k, idx, avoid) {
       }
     }
     if (got < want) notes.push(`${m.name}: maar ${got} van ${want} mogelijk`);
+    if (got) gotList.push({ name: m.name.trim(), n: got });
   }
-  return { forced: [...used].map(([id, count]) => ({ id, count })), notes };
+  return { forced: [...used].map(([id, count]) => ({ id, count })), notes, gotList };
 }
 
 function plannedPick(a, unit) {
@@ -772,10 +775,10 @@ function plannedPick(a, unit) {
   const hasMust = state.must.some((m) => m.name.trim() && m.n > 0);
   if (!hasMust) {
     const cards = pickVaried(unit.pool, unit.n, a.k, unit.count, avoid, Math.random, check) || unit.bundles[0];
-    return { cards, forcedIds: new Set(), notes: [], loss: [] };
+    return { cards, forcedIds: new Set(), notes: [], loss: [], pokemon: [] };
   }
   const idx = cardIndex();
-  const { forced, notes } = forcedPick(unit, a.k, idx, avoid);
+  const { forced, notes, gotList } = forcedPick(unit, a.k, idx, avoid);
   const fIds = new Set(forced.map((x) => x.id));
   const rest = unit.pool.filter((c) => !fIds.has(c.id));
   const need = unit.n - forced.reduce((s, x) => s + x.count, 0);
@@ -784,7 +787,7 @@ function plannedPick(a, unit) {
   if (fill === null) fill = pickVaried(rest, need, a.k, 1, avoid);
   if (fill === null) return { cards: null, forcedIds: fIds, notes: [...notes, 'Niet genoeg andere kaarten om aan te vullen.'], loss: [] };
   const cards = combine(fill);
-  return { cards, forcedIds: fIds, notes, loss: planLoss(a, unit, cards) };
+  return { cards, forcedIds: fIds, notes, loss: planLoss(a, unit, cards), pokemon: gotList };
 }
 
 function mustHtml(unit, k) {
@@ -820,7 +823,7 @@ function makeSheet(key) {
   if (!unit || !unit.count) { toast('Dit is niet meer mogelijk.'); render(); return; }
   const pick = plannedPick(a, unit);
   const b = pick.cards || [];
-  state.pending = pick.cards ? { key, cards: b } : null;
+  state.pending = pick.cards ? { key, cards: b, pokemon: pick.pokemon } : null;
   const idx = cardIndex();
   const lines = b.map((x) => ({ ...idx.get(x.id), count: x.count, forced: pick.forcedIds.has(x.id) }))
     .sort((p, q) => (q.forced - p.forced) || (p.setName || '').localeCompare(q.setName || '') || String(p.localId).localeCompare(String(q.localId), undefined, { numeric: true }));
@@ -850,6 +853,9 @@ function makeSheet(key) {
     <h2>${esc(unit.label)}</h2>
     <p class="muted small">${unit.size} kaarten: ${unit.n} gewoon (hieronder)${unit.energy ? ` + ${unit.energy} energy` : ''}${unit.shiny ? ` + ${unit.shiny} holo/reverse` : ''} · ${eur(unit.price)}</p>
     ${todo.length || pack ? `<div class="callout">${icon('spark', 18)} <span>${todo.length ? `Neem ook ${todo.join(', ')}` : 'Neem de kaarten'}${pack}.</span></div>` : ''}
+    <label class="field"><span>Naam in zoekertje</span>
+      <input class="input" value="${esc(state.makeName)}" placeholder="${esc(unit.name)}" data-make-name aria-label="Naam in zoekertje"></label>
+    ${state.makeName ? '' : `<p class="muted small">Leeg = "${esc(unit.name)}". Bv. "Eevee mini tin" voor een thema; geldt alleen voor deze ${unit.kind === 'tin' ? 'tin' : 'bundel'}.</p>`}
     ${mustHtml(unit, a.k)}
     ${warn.length ? `<div class="callout warnbox">${warn.map((w) => `<div>${w}</div>`).join('')}</div>` : ''}
     <div class="btn-row"><button class="btn small" data-action="make" data-key="${esc(key)}" data-keep="1">Andere mix</button>
@@ -877,7 +883,9 @@ async function confirmMake(key) {
   }
   if (pk.kind === 'tin') { pk.stock -= 1; await save.settings(); }
   state.bundles.unshift({
-    id: uid(), type: unit.kind, packId: unit.packId, ref: unit.ref, label: unit.label, name: unit.name,
+    id: uid(), type: unit.kind, packId: unit.packId, ref: unit.ref,
+    label: state.makeName ? (unit.setName ? `${state.makeName} · ${unit.setName}` : state.makeName) : unit.label,
+    name: state.makeName || unit.name, pokemon: p.pokemon || [],
     setName: unit.setName, price: unit.price, size: unit.size, cu: unit.n, shiny: unit.shiny, energy: unit.energy, extras: unit.extras,
     cards: b, status: 'gemaakt', createdAt: today(), mode: a.k, steps: {},
   });
@@ -968,7 +976,8 @@ function listingFor(b) {
   const tag = (S.hashtag || '').replace(/^#/, '').trim();
   const setLabel = b.setName || (b.ref && b.ref !== 'mix' && b.ref !== 'random' ? setName(b.ref) : '');
   const vars = {
-    naam: pk.name || b.label,
+    naam: b.name || pk.name || b.label,
+    pokemon: (b.pokemon || []).map((x) => `${x.n}× ${x.name}`).join(', '),
     kaarten: b.size,
     cu: (b.cu ?? (b.size - (b.shiny || 0) - (b.energy || 0))) + (b.energy || 0), // energy telt mee als gewone kaart
     holo: b.shiny || 0,
@@ -983,8 +992,9 @@ function listingFor(b) {
   };
   const kind = pk.kind === 'tin' ? 'tin' : 'bundle';
   return {
-    title: fillTemplate(pk.title || TEMPLATES[`${kind}Title`], vars),
-    text: fillTemplate(pk.text || TEMPLATES[`${kind}Text`], vars),
+    title: b.listing?.title ?? fillTemplate(pk.title || TEMPLATES[`${kind}Title`], vars),
+    text: b.listing?.text ?? fillTemplate(pk.text || TEMPLATES[`${kind}Text`], vars),
+    edited: !!b.listing,
   };
 }
 
@@ -1002,9 +1012,10 @@ function stepSheet(id, step) {
       return `
         <div class="listing">
           ${targets.length > 1 ? `<div class="acc-sub">${esc(b.label)}</div>` : ''}
-          <label class="field"><span>Titel</span><input class="input" readonly value="${esc(l.title)}" id="lt-${i}"></label>
+          <label class="field"><span>Titel</span><input class="input" value="${esc(l.title)}" id="lt-${i}" data-listing="${b.id}" data-lf="title"></label>
           <button class="btn small" data-action="copy" data-src="lt-${i}">${icon('copy', 16)} Titel kopiëren</button>
-          <label class="field"><span>Beschrijving</span><textarea class="input" rows="12" readonly id="ld-${i}">${esc(l.text)}</textarea></label>
+          <label class="field"><span>Beschrijving</span><textarea class="input" rows="12" id="ld-${i}" data-listing="${b.id}" data-lf="text">${esc(l.text)}</textarea></label>
+          ${l.edited ? `<button class="btn ghost small" data-action="listing-reset" data-id="${b.id}">Standaardtekst terugzetten</button>` : '<p class="muted small">Je kunt titel en tekst hier nog aanpassen; dat wordt bewaard voor deze tin/bundel.</p>'}
           <button class="btn small" data-action="copy" data-src="ld-${i}">${icon('copy', 16)} Beschrijving kopiëren</button>
         </div>`;
     }).join('');
@@ -1167,7 +1178,7 @@ function renderSettings() {
     ${acc('listing', 'Zoekertjes', `#${esc(S.hashtag || '')}`, `
       <label class="field"><span>Eigen hashtag (zonder #)</span><input class="input" value="${esc(S.hashtag || '')}" data-text-setting="hashtag"></label>
       <label class="field"><span>Zoekwoorden onderaan</span><textarea class="input" rows="4" data-text-setting="keywords">${esc(S.keywords || '')}</textarea></label>
-      <p class="muted small">Invulvelden in de teksten van tins en bundels: {naam} {kaarten} {cu} (gewoon + energy) {holo} {energy} {extras} {set} {prijs} {hashtag} {hashtagsoort} {hashtagset} {zoekwoorden}. De app vult ze automatisch in; je hoeft niets manueel te vervangen. Een regel waarin een invulveld leeg of 0 is, valt weg.</p>`)}
+      <p class="muted small">Invulvelden in de teksten van tins en bundels: {naam} (naam bij Maak) {pokemon} (gekozen Pokémon) {kaarten} {cu} (gewoon + energy) {holo} {energy} {extras} {set} {prijs} {hashtag} {hashtagsoort} {hashtagset} {zoekwoorden}. De app vult ze automatisch in; je hoeft niets manueel te vervangen. Een regel waarin een invulveld leeg of 0 is, valt weg.</p>`)}
     ${acc('backup', 'Back-up', 'alles staat enkel op dit toestel', `
       <p class="muted small">Maak geregeld een back-up: zo raak je je voorraad, bundels en verkopen niet kwijt.</p>
       <div class="btn-row">
@@ -1284,7 +1295,7 @@ async function onClick(e) {
     case 'start-analysis': startAnalysisSheet(); break;
     case 'run-analysis': await runAnalysis(); break;
     case 'make':
-      if (!el.dataset.keep) state.must = [];
+      if (!el.dataset.keep) { state.must = []; state.makeName = ''; }
       makeSheet(el.dataset.key); break;
     case 'must-add': state.must.push({ name: '', n: 1 }); makeSheet(el.dataset.key);
       setTimeout(() => { const i = document.querySelectorAll('[data-must-field="name"]'); i[i.length - 1]?.focus(); }, 50); break;
@@ -1331,6 +1342,11 @@ async function onClick(e) {
       [list[a1], list[a2]] = [list[a2], list[a1]];
       state.openPack = p.id;
       await save.settings(); render(); break;
+    }
+    case 'listing-reset': {
+      const b = state.bundles.find((x) => x.id === el.dataset.id);
+      if (b) { delete b.listing; await save.bundles(); stepSheet(el.dataset.id, 'online'); }
+      break;
     }
     case 'pack-preview': {
       const pk = packById(el.dataset.pack);
@@ -1388,6 +1404,15 @@ async function onChange(e) {
   const el = e.target;
   if (el.dataset.input === 'count') requestCount(el.dataset.card, Number(el.value));
   if (el.dataset.input === 'restore' && el.files?.[0]) await restoreBackup(el.files[0]);
+  if (el.dataset.makeName !== undefined) state.makeName = el.value.trim();
+  if (el.dataset.listing) {
+    const b = state.bundles.find((x) => x.id === el.dataset.listing);
+    if (b) {
+      const cur = listingFor(b);
+      b.listing = { title: cur.title, text: cur.text, [el.dataset.lf]: el.value };
+      await save.bundles();
+    }
+  }
   if (el.dataset.mustField) {
     const m = state.must[Number(el.dataset.must)];
     if (m) m[el.dataset.mustField] = el.dataset.mustField === 'n' ? Math.max(1, Math.round(Number(el.value) || 1)) : el.value;
