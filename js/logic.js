@@ -1,14 +1,13 @@
 // PokeBundels — pure rekenlogica (geen DOM, testbaar in Node)
 
-// Standaardteksten voor zoekertjes. Invulvelden: {naam} {kaarten} {cu} {holo} {energy} {extras} {set} {prijs}
+// Standaardteksten voor zoekertjes. {cu} = gewone kaarten + energy samen. Invulvelden: {naam} {kaarten} {cu} {holo} {energy} {extras} {set} {prijs}
 // {hashtag} {hashtagsoort} {hashtagset} {zoekwoorden}. Een regel waarin een invulveld leeg of 0 is, valt weg.
 export const TEMPLATES = {
   tinTitle: '{naam} met {kaarten} Pokémon kaarten ({set})',
   tinText: [
     '{naam} gevuld met {kaarten} Engelse Pokémon kaarten uit {set}.',
-    '• {cu} gewone kaarten (common/uncommon)',
+    '• {cu} gewone kaarten',
     '• {holo} blinkende kaarten (holo/reverse)',
-    '• {energy} energy',
     '• Extra: {extras}',
     'Geen dubbels in de tin.',
     '',
@@ -22,9 +21,8 @@ export const TEMPLATES = {
   bundleTitle: 'Pokémon kaarten setje – {kaarten} kaarten {set}',
   bundleText: [
     'Setje van {kaarten} Engelse Pokémon kaarten uit {set}.',
-    '• {cu} gewone kaarten (common/uncommon)',
+    '• {cu} gewone kaarten',
     '• {holo} blinkende kaarten (holo/reverse)',
-    '• {energy} energy',
     '• Extra: {extras}',
     'Geen dubbels in het setje.',
     '',
@@ -45,12 +43,12 @@ const pack = (id, kind, name, cu, shiny, price, source, extra = {}) => ({
   ...extra,
 });
 
-// Startwaarden voor tins (oktober 2026). "accessoires" = wat bij de tin hoorde (sticker, artkaartje, coin…).
+// Startwaarden voor tins (oktober 2026). "accessoires" = sticker, artkaartje, coin… (staan op de foto).
 const TIN_DEFAULTS = [
-  { id: 'mini', name: 'Mini tin', cu: 20, energy: 3, shiny: 2, price: 5, extras: 'accessoires van de tin' },
-  { id: 'pen', name: 'Pennenzak tin', cu: 40, energy: 5, shiny: 5, price: 10, extras: 'accessoires van de tin' },
-  { id: 'tin', name: 'Octagon tin', cu: 60, energy: 7, shiny: 8, price: 15, extras: 'accessoires van de tin' },
-  { id: 'stack', name: 'Stack tin', cu: 60, energy: 7, shiny: 8, price: 15, extras: 'accessoires van de tin' },
+  { id: 'mini', name: 'Mini tin', cu: 20, energy: 3, shiny: 2, price: 4.5, extras: 'accessoires' },
+  { id: 'pen', name: 'Pennenzak tin', cu: 40, energy: 5, shiny: 5, price: 9.5, extras: 'accessoires' },
+  { id: 'tin', name: 'Octagon tin', cu: 60, energy: 7, shiny: 8, price: 14.5, extras: 'accessoires' },
+  { id: 'stack', name: 'Stack tin', cu: 60, energy: 7, shiny: 8, price: 14.5, extras: 'accessoires' },
   { id: 'map', name: 'Mapje', cu: 0, energy: 0, shiny: 0, price: 0, extras: '' },
 ];
 
@@ -58,15 +56,15 @@ const TIN_DEFAULTS = [
 export function defaultPacks() {
   return [
     ...TIN_DEFAULTS.map((t) => pack(t.id, 'tin', t.name, t.cu, t.shiny, t.price, 'mix', { energy: t.energy, extras: t.extras })),
-    pack('set', 'bundle', 'Setbundel', 45, 5, 6.5, 'perset'),
-    pack('random', 'bundle', 'Random bundel', 45, 5, 5, 'mix'),
+    pack('set', 'bundle', 'Setbundel', 45, 5, 6, 'perset'),
+    pack('random', 'bundle', 'Random bundel', 45, 5, 4.5, 'mix'),
   ];
 }
 
 export const DEFAULT_SETTINGS = {
   packs: defaultPacks(),
   activeMode: 1,
-  packsVersion: 2,
+  packsVersion: 3,
   hashtag: 'pokebundelsbe',
   keywords: 'pokemon pokémon pokemonkaarten pokemoncards kaarten scarlet violet cadeau cadeautje cadeautip verjaardag verjaardagscadeau sinterklaas kerst verzamelen setje bundel tradingcards tcg',
   mySets: [],
@@ -99,6 +97,17 @@ export function migrateSettings(saved) {
     const tins = out.packs.filter((x) => x.kind === 'tin').sort((a, b) => (order.indexOf(a.id) + 1 || 99) - (order.indexOf(b.id) + 1 || 99));
     out.packs = [...tins, ...out.packs.filter((x) => x.kind !== 'tin')];
     out.packsVersion = 2;
+  }
+  if ((saved?.packsVersion || 0) < 3) {
+    // energy niet apart in zoekertjes, "accessoires" zonder "van de tin", standaardprijzen €0,50 lager
+    const oldPrice = { mini: 5, pen: 10, tin: 15, stack: 15, set: 6.5, random: 5 };
+    for (const p of out.packs) {
+      p.text = String(p.text || '').split('\n').filter((l) => !l.includes('{energy}')).join('\n')
+        .replace('• {cu} gewone kaarten (common/uncommon)', '• {cu} gewone kaarten');
+      if (p.extras === 'accessoires van de tin') p.extras = 'accessoires';
+      if (oldPrice[p.id] !== undefined && p.price === oldPrice[p.id]) p.price = oldPrice[p.id] - 0.5;
+    }
+    out.packsVersion = 3;
   }
   for (const k of ['bonusThreshold', 'setBundle', 'randomBundle', 'tins', 'themeBundle', 'themes', 'themesFromPremium', 'premiumSets', 'premiumBundle', 'premiumRestToRandom']) delete out[k];
   return out;

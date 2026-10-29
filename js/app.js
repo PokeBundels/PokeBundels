@@ -6,7 +6,7 @@ import {
   MODES, TEMPLATES, analysePlan, defaultPacks, migrateSettings, parseExtras, isNonShiny, isNonHoloRare, isBundleCard, normNr, parseImport, pickVaried,
 } from './logic.js';
 
-const VERSION = '2.1.0';
+const VERSION = '2.1.1';
 const DAC7 = { sales: 30, revenue: 2000 };
 const PLATFORMS = ['Vinted', '2dehands', 'Anders'];
 
@@ -738,7 +738,7 @@ function makeSheet(key) {
   const pack = unit.kind === 'tin' ? ` en steek alles in de <b>${esc(unit.name)}</b>` : '';
   openSheet(`
     <h2>${esc(unit.label)}</h2>
-    <p class="muted small">${unit.n} gewone kaarten${todo.length ? ' + extra' : ''} · ${eur(unit.price)}</p>
+    <p class="muted small">${unit.size} kaarten: ${unit.n} gewoon (hieronder)${unit.energy ? ` + ${unit.energy} energy` : ''}${unit.shiny ? ` + ${unit.shiny} holo/reverse` : ''} · ${eur(unit.price)}</p>
     ${todo.length || pack ? `<div class="callout">${icon('spark', 18)} <span>${todo.length ? `Neem ook ${todo.join(', ')}` : 'Neem de kaarten'}${pack}.</span></div>` : ''}
     <div class="btn-row"><button class="btn small" data-action="make" data-key="${esc(key)}">Andere mix</button>
       <span class="muted small">Willekeurig, zo weinig mogelijk dezelfde kaarten als je andere klaargemaakte.</span></div>
@@ -833,11 +833,21 @@ function stepTargets(id) {
   return [b];
 }
 
+// Een regel met tekst valt weg als een invulveld erin leeg of 0 is.
+// Een regel met enkel invulvelden (bv. de hashtags) houdt wat wel ingevuld is.
 function fillTemplate(tpl, vars) {
-  return String(tpl || '').split('\n').filter((line) => {
+  const empty = (key) => vars[key] === '' || vars[key] === 0 || vars[key] === undefined || vars[key] === null;
+  return String(tpl || '').split('\n').map((line) => {
     const keys = [...line.matchAll(/\{(\w+)\}/g)].map((m) => m[1]);
-    return keys.every((key) => vars[key] !== '' && vars[key] !== 0 && vars[key] !== undefined && vars[key] !== null);
-  }).map((line) => line.replace(/\{(\w+)\}/g, (m, key) => (vars[key] ?? m))).join('\n').replace(/\n{3,}/g, '\n\n').trim();
+    if (!keys.length) return line;
+    const onlyFields = !line.replace(/\{\w+\}/g, '').trim();
+    if (onlyFields) {
+      const out = keys.filter((k) => !empty(k)).map((k) => vars[k]).join(' ');
+      return out || null;
+    }
+    if (keys.some(empty)) return null;
+    return line.replace(/\{(\w+)\}/g, (m, key) => (vars[key] ?? m));
+  }).filter((l) => l !== null).join('\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
 function listingFor(b) {
@@ -848,7 +858,7 @@ function listingFor(b) {
   const vars = {
     naam: pk.name || b.label,
     kaarten: b.size,
-    cu: b.cu ?? (b.size - (b.shiny || 0)),
+    cu: (b.cu ?? (b.size - (b.shiny || 0) - (b.energy || 0))) + (b.energy || 0), // energy telt mee als gewone kaart
     holo: b.shiny || 0,
     energy: b.energy || 0,
     extras: parseExtras(b.extras).map((x) => x.label).join(', '),
@@ -1042,7 +1052,7 @@ function renderSettings() {
     ${acc('listing', 'Zoekertjes', `#${esc(S.hashtag || '')}`, `
       <label class="field"><span>Eigen hashtag (zonder #)</span><input class="input" value="${esc(S.hashtag || '')}" data-text-setting="hashtag"></label>
       <label class="field"><span>Zoekwoorden onderaan</span><textarea class="input" rows="4" data-text-setting="keywords">${esc(S.keywords || '')}</textarea></label>
-      <p class="muted small">Invulvelden in de teksten van tins en bundels: {naam} {kaarten} {cu} {holo} {energy} {extras} {set} {prijs} {hashtag} {hashtagsoort} {hashtagset} {zoekwoorden}. Een regel waarin een invulveld leeg of 0 is, valt weg.</p>`)}
+      <p class="muted small">Invulvelden in de teksten van tins en bundels: {naam} {kaarten} {cu} (gewoon + energy) {holo} {energy} {extras} {set} {prijs} {hashtag} {hashtagsoort} {hashtagset} {zoekwoorden}. Een regel waarin een invulveld leeg of 0 is, valt weg.</p>`)}
     ${acc('backup', 'Back-up', 'alles staat enkel op dit toestel', `
       <p class="muted small">Maak geregeld een back-up: zo raak je je voorraad, bundels en verkopen niet kwijt.</p>
       <div class="btn-row">
