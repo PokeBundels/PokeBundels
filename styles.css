@@ -51,7 +51,7 @@ a { color: var(--accent); }
 /* nav */
 .nav {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
-  display: grid; grid-template-columns: repeat(5, minmax(0, 1fr));
+  display: grid; grid-template-columns: repeat(6, minmax(0, 1fr));
   background: rgba(18, 20, 43, 0.96);
   backdrop-filter: blur(10px);
   border-top: 1px solid var(--line);
@@ -280,3 +280,27 @@ details.acc > summary:focus-visible { outline: 2px solid var(--accent); outline-
 .tin-edit .four { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
 .tin-edit .field span { white-space: nowrap; }
 .tin-edit .four .field { margin: 0; }
+
+/* Te verkopen */
+.sell-item { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px; margin-bottom: 10px; }
+.sell-item.picked { border-color: var(--accent); }
+.sell-top { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: center; }
+.sell-top input { width: 20px; height: 20px; }
+.steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin: 10px 0 6px; }
+.step { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 52px; padding: 6px 4px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface-2); color: var(--muted); font: inherit; font-size: 12px; font-weight: 700; line-height: 1.15; text-align: center; cursor: pointer; }
+.step small { font-weight: 500; font-size: 11px; }
+.step.done { background: #1f7a4d; border-color: #2fa36a; color: #fff; }
+.listing { padding: 6px 0 12px; border-bottom: 1px solid var(--line); }
+.listing .btn { margin: 4px 0 8px; }
+
+/* Instellingen: tins en bundels */
+details.pack { border: 1px solid var(--line); border-radius: 12px; margin: 8px 0; background: var(--surface-2); }
+details.pack > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 8px 12px; }
+details.pack > summary::-webkit-details-marker { display: none; }
+.pack-b { padding: 4px 12px 12px; border-top: 1px solid var(--line); }
+.pack-b .four { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.pack-b .four .field { margin: 0; }
+.pack-b .four .field span { white-space: nowrap; font-size: 13px; }
+
+/* zes tabbladen onderaan */
+.nav-btn span { font-size: 10.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }

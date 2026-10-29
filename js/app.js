@@ -3,10 +3,10 @@
 import { db, persist } from './db.js';
 import { listSets, getSet, imageUrl, fillReleaseDates } from './tcgdex.js';
 import {
-  DEFAULT_SETTINGS, MODES, analyse, isNonShiny, isNonHoloRare, isBundleCard, maxBundles, normNr, parseImport, pickVaried,
+  MODES, TEMPLATES, analysePlan, defaultPacks, migrateSettings, parseExtras, isNonShiny, isNonHoloRare, isBundleCard, normNr, parseImport, pickVaried,
 } from './logic.js';
 
-const VERSION = '1.5.0';
+const VERSION = '2.0.0';
 const DAC7 = { sales: 30, revenue: 2000 };
 const PLATFORMS = ['Vinted', '2dehands', 'Anders'];
 
@@ -18,7 +18,7 @@ function saveOpenEras() {
 }
 
 const state = {
-  settings: structuredClone(DEFAULT_SETTINGS),
+  settings: migrateSettings(null),
   inventory: {},      // cardId -> aantal
   bundles: [],        // gemaakte/verkochte bundels
   sales: [],
@@ -30,7 +30,8 @@ const state = {
   mode: 1,
   pick: new Set(),    // geselecteerde bundels om te verkopen
   openAcc: null,      // open groep in Instellingen
-  tinSource: {},      // gekozen bron per tin in Bundels
+  sub: { ana: 'overzicht', prep: 'tins' }, // subtabbladen
+  openPack: null,     // opengeklapte tin/bundel in Instellingen
   openEras: loadOpenEras(), // opengeklapte era's in Inventaris
   invVersion: 0,
   analysisCache: {},
@@ -48,16 +49,10 @@ async function load() {
   const [settings, inventory, bundles, sales] = await Promise.all([
     db.get('settings'), db.get('inventory'), db.get('bundles'), db.get('sales'),
   ]);
-  state.settings = { ...structuredClone(DEFAULT_SETTINGS), ...(settings || {}) };
-  for (const k of ['setBundle', 'randomBundle']) {
-    state.settings[k] = { ...DEFAULT_SETTINGS[k], ...(settings?.[k] || {}) };
-  }
-  // instellingen van de vroegere thema- en premiumbundels opruimen
-  for (const k of ['themeBundle', 'themes', 'themesFromPremium', 'premiumSets', 'premiumBundle', 'premiumRestToRandom']) delete state.settings[k];
+  state.settings = migrateSettings(settings);
   state.inventory = inventory || {};
   state.bundles = bundles || [];
   state.sales = sales || [];
-  state.mode = state.settings.activeMode || 1;
   state.setList = (await db.get('setlist2'))?.sets || [];
   for (const id of state.settings.mySets) {
     const s = await db.get(`set:${id}`);
@@ -97,7 +92,7 @@ function setNames() {
 
 function getAnalysis(k) {
   const key = `${k}:${state.invVersion}:${JSON.stringify(state.settings)}`;
-  if (!state.analysisCache[key]) state.analysisCache[key] = analyse(inventoryCards(), state.settings, k, setNames());
+  if (!state.analysisCache[key]) state.analysisCache = { [key]: analysePlan(inventoryCards(), state.settings, k, setNames()) };
   return state.analysisCache[key];
 }
 
@@ -190,7 +185,8 @@ async function checkUpdate() {
 const ICONS = {
   inv: '<path d="M4 7h16v13H4z"/><path d="M8 7V4h8v3"/><path d="M4 12h16"/>',
   ana: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
-  bun: '<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M5 8h14"/><path d="M12 12l1 2 2 .3-1.5 1.4.4 2.1L12 17l-1.9 1 .4-2.1L9 14.3l2-.3z"/>',
+  prep: '<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M5 8h14"/><path d="M12 12l1 2 2 .3-1.5 1.4.4 2.1L12 17l-1.9 1 .4-2.1L9 14.3l2-.3z"/>',
+  sell: '<path d="M20.6 13.4l-7.2 7.2a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="8" cy="8" r="1.5"/>',
   sale: '<path d="M3 3h2l2.4 12.2a2 2 0 0 0 2 1.6h7.7a2 2 0 0 0 2-1.5L21 8H6"/><circle cx="10" cy="20.5" r="1.3"/><circle cx="17" cy="20.5" r="1.3"/>',
   set: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
   back: '<path d="M15 18l-6-6 6-6"/>',
@@ -208,14 +204,14 @@ const icon = (name, size = 22) => `<svg width="${size}" height="${size}" viewBox
 
 function render() {
   const nav = [
-    ['inv', 'Inventaris'], ['ana', 'Analyse'], ['bun', 'Bundels'], ['sale', 'Verkoop'], ['set', 'Instellingen'],
+    ['inv', 'Inventaris'], ['ana', 'Analyse'], ['prep', 'Voorbereiding'], ['sell', 'Te verkopen'], ['sale', 'Verkocht'], ['set', 'Instellingen'],
   ];
   $('#nav').innerHTML = nav.map(([id, label]) => `
     <button class="nav-btn ${state.view === id ? 'active' : ''}" data-action="nav" data-view="${id}" aria-label="${label}" ${state.view === id ? 'aria-current="page"' : ''}>
       ${icon(id)}<span>${label}</span>
     </button>`).join('');
   const main = $('#main');
-  const views = { inv: renderInventory, ana: renderAnalysis, bun: renderBundles, sale: renderSales, set: renderSettings };
+  const views = { inv: renderInventory, ana: renderAnalysis, prep: renderPrep, sell: renderSell, sale: renderSales, set: renderSettings };
   main.innerHTML = views[state.view]();
   navSync();
 }
@@ -571,205 +567,156 @@ async function doImport() {
 
 // ----- Analyse -----
 
+function packById(id) { return state.settings.packs.find((p) => p.id === id); }
+function tinPacks() { return state.settings.packs.filter((p) => p.kind === 'tin'); }
+function bundlePacks() { return state.settings.packs.filter((p) => p.kind !== 'tin'); }
+function sourceName(src) {
+  if (src === 'mix') return 'alle sets gemengd';
+  if (src === 'perset') return 'per set';
+  return setName(src);
+}
+function compText(p) {
+  const parts = [`${p.cu} gewoon`];
+  if (p.shiny) parts.push(`${p.shiny} holo/reverse`);
+  if (p.energy) parts.push(`${p.energy} energy`);
+  for (const x of parseExtras(p.extras)) parts.push(`${x.n} ${x.name}`);
+  return parts.join(' + ');
+}
+
+function subTabs(view, tabs) {
+  const cur = state.sub[view];
+  return `<div class="segs" role="tablist">${tabs.map(([id, label]) => `
+    <button class="seg ${cur === id ? 'on' : ''}" data-action="sub" data-view="${view}" data-sub="${id}" role="tab" aria-selected="${cur === id}">${label}</button>`).join('')}</div>`;
+}
+
 function renderAnalysis() {
-  const k = state.mode;
-  const cards = inventoryCards();
-  const tabs = MODES.map((m) => `<button class="seg ${m.k === k ? 'on' : ''}" data-action="mode" data-k="${m.k}" role="tab" aria-selected="${m.k === k}">${m.label}</button>`).join('');
-  if (!cards.length) {
-    return `<header class="page-head"><h1>Bundelvoorstel</h1></header>
-      <div class="segs" role="tablist">${tabs}</div>
-      <div class="empty">Nog geen kaarten in voorraad.</div>`;
-  }
+  const k = state.settings.activeMode;
+  const head = `
+    <header class="page-head"><h1>Analyse</h1>
+      <p class="muted small">Eerst zoveel mogelijk tins, daarna bundels. Alles volgens je instellingen.</p></header>
+    ${subTabs('ana', [['overzicht', 'Overzicht'], ['tins', 'Tins'], ['bundels', 'Bundels']])}`;
+  if (!inventoryCards().length) return `${head}<div class="empty">Nog geen kaarten in voorraad.</div>`;
   const a = getAnalysis(k);
-  const S = state.settings;
-  const active = S.activeMode === k;
-
-  const setList = Object.values(a.sets).sort((x, y) => x.name.localeCompare(y.name));
-  const setRows = setList.map((s) => `
-    <tr><td>${esc(s.name)}</td>
-    <td class="num">${s.unique}</td><td class="num">${s.total}</td>
-    <td class="num"><b>${s.bundles.length}</b></td><td class="num">${s.rest}</td></tr>`).join('');
-
-  const shinyRows = Object.entries(a.summary.shinyNeed).map(([id, n]) =>
-    `<li><span>${esc(setName(id))}</span><b>${n}</b></li>`).join('');
-
-  return `
-    <header class="page-head">
-      <h1>Bundelvoorstel</h1>
-      <p class="muted small">Zoveel mogelijk bundels per set, de rest gaat naar random.</p>
-    </header>
-    <div class="segs" role="tablist">${tabs}</div>
+  const sub = state.sub.ana;
+  if (sub === 'tins' || sub === 'bundels') {
+    const kind = sub === 'tins' ? 'tin' : 'bundle';
+    const packs = kind === 'tin' ? tinPacks() : bundlePacks();
+    const body = packs.map((p) => {
+      const units = a.units.filter((u) => u.packId === p.id);
+      const n = units.reduce((s, u) => s + u.count, 0);
+      const rows = p.source === 'perset' ? units.filter((u) => u.count).map((u) => `<li><span>${esc(u.setName)}</span><b>${u.count}×</b></li>`).join('') : '';
+      return `
+        <section class="card">
+          <h2>${esc(p.name)} <span class="opt-n">${n}×</span></h2>
+          <p class="muted small">${esc(compText(p))} · ${esc(sourceName(p.source))} · ${eur(p.price)}${kind === 'tin' ? ` · ${p.stock || 0} tins beschikbaar` : ''}</p>
+          ${rows ? `<ul class="kv">${rows}</ul>` : ''}
+          ${kind === 'tin' && n < (p.stock || 0) ? `<p class="small warn">Niet genoeg kaarten voor alle ${p.stock} tins.</p>` : ''}
+        </section>`;
+    }).join('');
+    return `${head}${body || `<div class="empty">Geen ${sub} ingesteld. Voeg ze toe in Instellingen.</div>`}`;
+  }
+  const S = a.summary;
+  const extras = Object.entries(S.extras).map(([nm, n]) => `<li><span>${esc(nm)}</span><b>${n}</b></li>`).join('');
+  const tabs = MODES.map((m) => `<button class="seg ${m.k === k ? 'on' : ''}" data-action="mode" data-k="${m.k}">${m.label}</button>`).join('');
+  return `${head}
+    <div class="btn-row"><button class="btn primary" data-action="start-analysis">${icon('refresh', 18)} Analyse starten</button></div>
     <div class="stats">
-      <div class="stat"><b>${a.summary.bundleCount}</b><span>bundels</span></div>
-      <div class="stat"><b>${eur(a.summary.revenue)}</b><span>opbrengst</span></div>
-      <div class="stat"><b>${a.summary.shinyTotal}</b><span>holo/reverse nodig</span></div>
+      <div class="stat"><b>${S.tins}</b><span>tins</span></div>
+      <div class="stat"><b>${S.bundles}</b><span>bundels</span></div>
+      <div class="stat"><b>${eur(S.revenue)}</b><span>opbrengst</span></div>
     </div>
-    <div class="btn-row">
-      ${active ? `<span class="pill ok">${icon('check', 16)} Actief plan</span>` : `<button class="btn primary" data-action="use-plan" data-k="${k}">Gebruik dit plan</button>`}
-      <button class="btn" data-action="reanalyse">${icon('refresh', 18)} Heranalyseren</button>
-    </div>
-
     <section class="card">
-      <h2>Sets <span class="muted small">(${S.setBundle.size} kaarten · ${eur(S.setBundle.price)})</span></h2>
-      <table class="tbl"><thead><tr><th>Set</th><th class="num">Uniek</th><th class="num">Kaarten</th><th class="num">Bundels</th><th class="num">Rest</th></tr></thead><tbody>${setRows}</tbody></table>
+      <h2>Kaarten</h2>
+      <ul class="kv">
+        <li><span>In voorraad (gewone kaarten)</span><b>${S.total}</b></li>
+        <li><span>Gebruikt in tins en bundels</span><b>${S.used}</b></li>
+        <li><span>Blijft over</span><b>${S.leftover}</b></li>
+      </ul>
     </section>
-
     <section class="card">
-      <h2>Random <span class="muted small">(${S.randomBundle.size} kaarten · ${eur(S.randomBundle.price)})</span></h2>
-      <p><b>${a.random.bundles.length}</b> bundels uit ${a.random.total} overschotkaarten (${a.random.unique} verschillend). Rest: ${a.random.rest}.</p>
-      ${a.summary.randomShiny ? `<p class="small">${icon('spark', 14)} ${a.summary.randomShiny} holo/reverse nodig uit gewone sets.</p>` : ''}
+      <h2>Nodig uit je map en voorraad</h2>
+      <ul class="kv">
+        <li><span>Holo/reverse</span><b>${S.shiny}</b></li>
+        ${S.energy ? `<li><span>Energy</span><b>${S.energy}</b></li>` : ''}
+        ${extras}
+      </ul>
     </section>
-
     <section class="card">
-      <h2>Holo/reverse nodig per set</h2>
-      ${shinyRows ? `<ul class="kv">${shinyRows}</ul>` : '<p class="muted">Geen setbundels.</p>'}
+      <h2>Dubbels per tin/bundel</h2>
+      <div class="segs">${tabs}</div>
     </section>`;
 }
 
-// ----- Bundels -----
-
-function bundleOptions(a) {
-  const S = state.settings;
-  const opts = [];
-  for (const s of Object.values(a.sets)) {
-    if (!s.bundles.length) continue;
-    opts.push({ type: 'set', ref: s.setId, label: s.name, sub: `${s.size} kaarten · ${s.shiny} holo/reverse uit deze set`, price: s.price, n: s.bundles.length, shinySet: s.setId, shiny: s.shiny });
-  }
-  if (a.random.bundles.length) {
-    opts.push({ type: 'random', ref: 'random', label: 'Random pick', sub: `${S.randomBundle.size} kaarten · ${S.randomBundle.shiny} holo/reverse uit gewone sets`, price: a.random.price, n: a.random.bundles.length, shiny: a.random.shiny });
-  }
-  const rank = { set: 0, random: 1 };
-  return opts.sort((x, y) => rank[x.type] - rank[y.type] || x.label.localeCompare(y.label));
+function startAnalysisSheet() {
+  const tins = tinPacks();
+  openSheet(`
+    <h2>Analyse starten</h2>
+    <p class="muted small">Hoeveel tins heb je ter beschikking? De analyse vult eerst zoveel mogelijk tins.</p>
+    ${tins.map((p) => `<label class="field"><span>${esc(p.name)} <span class="muted small">(${esc(compText(p))})</span></span>
+      <input class="input" type="number" min="0" inputmode="numeric" value="${p.stock || 0}" data-start-tin="${esc(p.id)}"></label>`).join('') || '<p class="muted">Geen tins ingesteld (Instellingen → Tins).</p>'}
+    <div class="btn-row sticky-actions">
+      <button class="btn" data-action="close-sheet">Annuleren</button>
+      <button class="btn primary" data-action="run-analysis">${icon('check', 18)} Analyse maken</button>
+    </div>`);
 }
 
-// Pakbon met variatie: willekeurige kaarten, en zo weinig mogelijk overlap met
-// nog niet verkochte bundels van hetzelfde soort (koper die er meerdere neemt).
-function variedBundle(a, type, ref) {
+async function runAnalysis() {
+  for (const inp of document.querySelectorAll('[data-start-tin]')) {
+    const p = packById(inp.dataset.startTin);
+    if (p) p.stock = Math.max(0, Math.round(Number(inp.value) || 0));
+  }
+  await save.settings();
+  state.analysisCache = {};
+  state.sub.ana = 'overzicht';
+  closeSheet();
+  render();
+  toast('Analyse gemaakt.');
+}
+
+// ----- Voorbereiding -----
+
+function renderPrep() {
+  const a = getAnalysis(state.settings.activeMode);
+  const kind = state.sub.prep === 'bundels' ? 'bundle' : 'tin';
+  const units = a.units.filter((u) => u.kind === kind && u.count > 0);
+  const rows = units.map((u) => `
+    <div class="opt">
+      <div class="opt-main"><div class="opt-name">${esc(u.label)}</div>
+        <div class="muted small">${esc(compText(packById(u.packId) || u))}</div></div>
+      <div class="opt-side"><span class="opt-n">${u.count}×</span><span class="small">${eur(u.price)}</span></div>
+      <button class="btn primary small" data-action="make" data-key="${esc(u.key)}">Maak</button>
+    </div>`).join('');
+  const open = state.bundles.filter((b) => b.status === 'gemaakt').length;
+  return `
+    <header class="page-head"><h1>Voorbereiding</h1>
+      <p class="muted small">Wat je volgens de analyse kunt maken. Gemaakt gaat naar <a href="#" data-action="nav" data-view="sell">Te verkopen</a> (${open}).</p></header>
+    ${subTabs('prep', [['tins', 'Tins'], ['bundels', 'Bundels']])}
+    <section class="card">${rows || `<p class="muted">Geen ${kind === 'tin' ? 'tins' : 'bundels'} te maken. ${kind === 'tin' ? 'Start de analyse en geef je tins op.' : ''}</p>`}</section>`;
+}
+
+// Pakbon met variatie. Voorwaarde: na deze tin/bundel blijft de rest van het plan even groot.
+function plannedPick(a, unit) {
   const avoid = new Set();
   for (const b of state.bundles) {
-    if (b.status === 'gemaakt' && b.type === type && b.ref === ref) for (const x of b.cards) avoid.add(x.id);
+    if (b.status === 'gemaakt' && `${b.packId}|${b.ref}` === unit.key) for (const x of b.cards) avoid.add(x.id);
   }
-  if (type === 'tin') {
-    const t = tinSpec(a, ref);
-    if (!t || !t.possible || t.tin.stock < 1) return null;
-    return pickVaried(t.pool, t.n, a.k, t.possible, avoid);
-  }
-  const part = type === 'random' ? a.random : a.sets[ref];
-  if (!part?.bundles.length) return null;
-  const n = part.size - part.shiny;
-  return pickVaried(part.pool, n, a.k, part.bundles.length, avoid) || part.bundles[0];
-}
-
-// ----- Tins: een verpakking met eigen aantal kaarten en prijs, gevuld uit random of uit één set -----
-
-function tinRef(tinId, source) { return `${tinId}|${source}`; }
-
-function tinSources(a) {
-  const out = [];
-  if (a.random.pool?.length) out.push({ id: 'random', name: 'Random (overschot)', pool: a.random.pool });
-  for (const s of Object.values(a.sets).sort((x, y) => x.name.localeCompare(y.name))) out.push({ id: s.setId, name: s.name, pool: s.pool });
-  return out;
-}
-
-function tinSpec(a, ref) {
-  const [tinId, source] = String(ref).split('|');
-  const tin = state.settings.tins.find((t) => t.id === tinId);
-  if (!tin) return null;
-  const src = tinSources(a).find((s) => s.id === source);
-  if (!src) return null;
-  const n = Math.max(0, tin.size - tin.shiny);
-  const possible = maxBundles(src.pool.map((c) => c.count), n, a.k);
-  return {
-    tin, source, pool: src.pool, n, possible,
-    type: 'tin', ref, label: `${tin.name} · ${src.name}`, price: tin.price, shiny: tin.shiny, size: tin.size,
+  const before = new Map(a.units.map((u) => [u.key, u.count]));
+  const check = (bundle) => {
+    const take = new Map(bundle.map((x) => [x.id, x.count]));
+    const cards = inventoryCards().map((c) => ({ ...c, count: c.count - (take.get(c.id) || 0) }));
+    const after = analysePlan(cards, state.settings, a.k, setNames());
+    return after.units.every((u) => u.count >= (before.get(u.key) || 0) - (u.key === unit.key ? 1 : 0));
   };
+  return pickVaried(unit.pool, unit.n, a.k, unit.count, avoid, Math.random, check) || unit.bundles[0];
 }
 
-function specFor(a, type, ref) {
-  if (type === 'tin') return tinSpec(a, ref);
-  return bundleOptions(a).find((o) => o.type === type && o.ref === ref);
-}
-
-function tinsHtml(a) {
-  const tins = state.settings.tins;
-  if (!tins.length) return '<p class="muted small">Nog geen tins. Voeg ze toe in Instellingen → Tins.</p>';
-  const sources = tinSources(a);
-  return tins.map((t) => {
-    const n = Math.max(0, t.size - t.shiny);
-    const opts = sources.map((s) => {
-      const p = maxBundles(s.pool.map((c) => c.count), n, a.k);
-      return `<option value="${esc(s.id)}" ${p ? '' : 'disabled'}>${esc(s.name)} (${p}×)</option>`;
-    }).join('');
-    const sel = state.tinSource[t.id];
-    return `
-      <div class="opt tin-opt">
-        <div class="opt-main"><div class="opt-name">${esc(t.name)}</div>
-          <div class="muted small">${t.size} kaarten (${t.shiny} holo/reverse) · ${t.stock} op voorraad</div>
-          <select class="input tin-src" data-tin-src="${esc(t.id)}" aria-label="Kaarten uit">${opts.replace(`value="${esc(sel || '')}"`, `value="${esc(sel || '')}" selected`)}</select>
-        </div>
-        <div class="opt-side"><span class="opt-n">${t.stock}×</span><span class="small">${eur(t.price)}</span></div>
-        <button class="btn primary small" data-action="make-tin" data-tin="${esc(t.id)}" ${t.stock > 0 ? '' : 'disabled'}>Maak</button>
-      </div>`;
-  }).join('');
-}
-
-function renderBundles() {
-  const k = state.settings.activeMode;
-  const mode = MODES.find((m) => m.k === k);
-  const a = getAnalysis(k);
-  const opts = bundleOptions(a);
-  const groups = { set: 'Sets', random: 'Random' };
-  let last = null;
-  const optHtml = opts.map((o) => {
-    const head = o.type !== last ? `<h3 class="group">${groups[o.type]}</h3>` : '';
-    last = o.type;
-    return `${head}
-      <div class="opt">
-        <div class="opt-main"><div class="opt-name">${esc(o.label)}</div><div class="muted small">${esc(o.sub)}</div></div>
-        <div class="opt-side"><span class="opt-n">${o.n}×</span><span class="small">${eur(o.price)}</span></div>
-        <button class="btn primary small" data-action="make" data-type="${o.type}" data-ref="${esc(o.ref)}">Maak</button>
-      </div>`;
-  }).join('');
-
-  const open = state.bundles.filter((b) => b.status === 'gemaakt');
-  const sel = open.filter((b) => state.pick.has(b.id));
-  const selTotal = sel.reduce((s, b) => s + b.price, 0);
-  const openHtml = open.map((b) => `
-    <label class="made">
-      <input type="checkbox" data-action="pick" data-id="${b.id}" ${state.pick.has(b.id) ? 'checked' : ''}>
-      <div class="made-main"><div>${esc(b.label)}</div><div class="muted small">${b.size} kaarten · gemaakt ${esc(b.createdAt)}</div></div>
-      <b>${eur(b.price)}</b>
-      <button class="btn ghost small" data-action="unmake" data-id="${b.id}" title="Kaarten terug in voorraad">Terug</button>
-    </label>`).join('');
-
-  return `
-    <header class="page-head">
-      <h1>Bundels maken</h1>
-      <p class="muted small">Plan: <b>${esc(mode?.label || '')}</b> · <a href="#" data-action="nav" data-view="ana">wijzigen</a></p>
-    </header>
-    <section class="card">
-      <h2>Te maken</h2>
-      ${optHtml || '<p class="muted">Geen bundels mogelijk met je huidige voorraad.</p>'}
-    </section>
-    <section class="card">
-      <h2>Tins</h2>
-      <p class="muted small">Kies waar de kaarten vandaan komen. Tussen haakjes: hoeveel tins je daaruit kunt vullen.</p>
-      ${tinsHtml(a)}
-    </section>
-    <section class="card">
-      <h2>Klaar voor verkoop <span class="muted small">(${open.length})</span></h2>
-      ${openHtml || '<p class="muted">Nog geen gemaakte bundels.</p>'}
-      ${open.length ? `<div class="btn-row sticky-actions"><button class="btn primary" data-action="sell" ${sel.length ? '' : 'disabled'}>Verkoop selectie (${sel.length}) · ${eur(selTotal)}</button></div>` : ''}
-    </section>`;
-}
-
-function makeSheet(type, ref) {
+function makeSheet(key) {
   const a = getAnalysis(state.settings.activeMode);
-  const b = variedBundle(a, type, ref);
-  if (!b) { toast('Deze bundel is niet meer mogelijk.'); render(); return; }
-  state.pending = { type, ref, cards: b };
+  const unit = a.units.find((u) => u.key === key);
+  if (!unit || !unit.count) { toast('Dit is niet meer mogelijk.'); render(); return; }
+  const b = plannedPick(a, unit);
+  state.pending = { key, cards: b };
   const idx = cardIndex();
-  const opt = specFor(a, type, ref);
   const lines = b.map((x) => ({ ...idx.get(x.id), count: x.count }))
     .sort((p, q) => (p.setName || '').localeCompare(q.setName || '') || String(p.localId).localeCompare(String(q.localId), undefined, { numeric: true }));
   let lastSet = null;
@@ -783,50 +730,49 @@ function makeSheet(type, ref) {
       <span class="nr">#${esc(c.localId)}</span><span class="nm">${esc(c.name)}</span>${c.count > 1 ? `<b class="cnt">×${c.count}</b>` : ''}
     </label></li>`;
   }).join('');
-  let shinyText = '';
-  const tinSet = type === 'tin' && opt.source !== 'random' ? opt.source : null;
-  if (type === 'set') shinyText = `Neem <b>${opt.shiny} holo/reverse uit ${esc(opt.label)}</b> uit je map.`;
-  else if (tinSet) shinyText = `Neem <b>${opt.shiny} holo/reverse uit ${esc(setName(tinSet))}</b> uit je map en steek alles in de <b>${esc(opt.tin.name)}</b>.`;
-  else if (type === 'tin') shinyText = `Neem <b>${opt.shiny} holo/reverse uit gewone sets</b> en steek alles in de <b>${esc(opt.tin.name)}</b>.`;
-  else {
-    const sets = Object.keys(a.random.shinyBySet).map((s) => state.sets[s]?.name || s).join(', ');
-    shinyText = `Neem <b>${opt.shiny} holo/reverse uit gewone sets</b>${sets ? ` (bv. ${esc(sets)})` : ''}.`;
-  }
-  const total = b.reduce((s, x) => s + x.count, 0);
+  const from = unit.ref === 'mix' ? 'gewone sets' : unit.setName;
+  const todo = [];
+  if (unit.shiny) todo.push(`<b>${unit.shiny} holo/reverse</b> uit ${esc(from)}`);
+  if (unit.energy) todo.push(`<b>${unit.energy} energy</b>`);
+  for (const x of parseExtras(unit.extras)) todo.push(`<b>${x.n} ${esc(x.name)}</b>`);
+  const pack = unit.kind === 'tin' ? ` en steek alles in de <b>${esc(unit.name)}</b>` : '';
   openSheet(`
-    <h2>${esc(opt.label)}</h2>
-    <p class="muted small">${total} niet-blinkende kaarten + ${opt.shiny} holo/reverse · ${eur(opt.price)}</p>
-    <div class="callout">${icon('spark', 18)} <span>${shinyText}</span></div>
-    <div class="btn-row"><button class="btn small" data-action="make" data-type="${type}" data-ref="${esc(ref)}">Andere mix</button>
-      <span class="muted small">Willekeurige kaarten, zo weinig mogelijk dezelfde als je andere klaargemaakte bundels.</span></div>
+    <h2>${esc(unit.label)}</h2>
+    <p class="muted small">${unit.n} gewone kaarten${todo.length ? ' + extra' : ''} · ${eur(unit.price)}</p>
+    ${todo.length || pack ? `<div class="callout">${icon('spark', 18)} <span>${todo.length ? `Neem ook ${todo.join(', ')}` : 'Neem de kaarten'}${pack}.</span></div>` : ''}
+    <div class="btn-row"><button class="btn small" data-action="make" data-key="${esc(key)}">Andere mix</button>
+      <span class="muted small">Willekeurig, zo weinig mogelijk dezelfde kaarten als je andere klaargemaakte.</span></div>
     <ul class="pick-list">${rows}</ul>
     <div class="btn-row sticky-actions">
       <button class="btn" data-action="close-sheet">Annuleren</button>
-      <button class="btn primary" data-action="confirm-make" data-type="${type}" data-ref="${esc(ref)}">${icon('check', 18)} Bundel gemaakt</button>
+      <button class="btn primary" data-action="confirm-make" data-key="${esc(key)}">${icon('check', 18)} Gemaakt</button>
     </div>`);
 }
 
-async function confirmMake(type, ref) {
+async function confirmMake(key) {
   const a = getAnalysis(state.settings.activeMode);
+  const unit = a.units.find((u) => u.key === key);
   const p = state.pending;
-  const b = p && p.type === type && p.ref === ref ? p.cards : null;
+  const b = p && p.key === key ? p.cards : null;
   state.pending = null;
-  const opt = specFor(a, type, ref);
-  if (!b || !opt || b.some((x) => (state.inventory[x.id] || 0) < x.count) || (type === 'tin' && opt.tin.stock < 1)) { closeSheet(); toast('Deze bundel is niet meer mogelijk.'); render(); return; }
-  if (type === 'tin') { opt.tin.stock -= 1; await save.settings(); }
+  const pk = unit && packById(unit.packId);
+  if (!b || !unit || !pk || b.some((x) => (state.inventory[x.id] || 0) < x.count) || (pk.kind === 'tin' && (pk.stock || 0) < 1)) {
+    closeSheet(); toast('Dit is niet meer mogelijk.'); render(); return;
+  }
   for (const x of b) {
     const n = (state.inventory[x.id] || 0) - x.count;
     if (n > 0) state.inventory[x.id] = n; else delete state.inventory[x.id];
   }
+  if (pk.kind === 'tin') { pk.stock -= 1; await save.settings(); }
   state.bundles.unshift({
-    id: uid(), type, ref, label: opt.label, price: opt.price, size: b.reduce((s, x) => s + x.count, 0) + opt.shiny,
-    shiny: opt.shiny, cards: b, status: 'gemaakt', createdAt: today(), mode: state.settings.activeMode,
-    ...(type === 'tin' ? { tinId: opt.tin.id } : {}),
+    id: uid(), type: unit.kind, packId: unit.packId, ref: unit.ref, label: unit.label, name: unit.name,
+    setName: unit.setName, price: unit.price, size: unit.size, cu: unit.n, shiny: unit.shiny, energy: unit.energy, extras: unit.extras,
+    cards: b, status: 'gemaakt', createdAt: today(), mode: a.k, steps: {},
   });
   await save.inventory();
   await save.bundles();
   closeSheet();
-  toast('Bundel gemaakt, kaarten uit voorraad gehaald.');
+  toast(`${unit.kind === 'tin' ? 'Tin' : 'Bundel'} gemaakt, staat bij Te verkopen.`);
   render();
 }
 
@@ -834,8 +780,8 @@ async function unmake(id) {
   const b = state.bundles.find((x) => x.id === id);
   if (!b || !confirm(`"${b.label}" uit elkaar halen en de kaarten terug in voorraad zetten?`)) return;
   for (const x of b.cards) state.inventory[x.id] = (state.inventory[x.id] || 0) + x.count;
-  const tin = b.tinId && state.settings.tins.find((t) => t.id === b.tinId);
-  if (tin) { tin.stock += 1; await save.settings(); }
+  const pk = packById(b.packId || b.tinId);
+  if (pk && pk.kind === 'tin' && (b.type === 'tin')) { pk.stock = (pk.stock || 0) + 1; await save.settings(); }
   state.bundles = state.bundles.filter((x) => x.id !== id);
   state.pick.delete(id);
   await save.inventory();
@@ -844,50 +790,159 @@ async function unmake(id) {
   render();
 }
 
-function sellSheet() {
-  const sel = state.bundles.filter((b) => state.pick.has(b.id) && b.status === 'gemaakt');
-  if (!sel.length) return;
-  const total = sel.reduce((s, b) => s + b.price, 0);
-  const thr = state.settings.bonusThreshold;
-  openSheet(`
-    <h2>Verkoop registreren</h2>
-    <ul class="kv">${sel.map((b) => `<li><span>${esc(b.label)}</span><b>${eur(b.price)}</b></li>`).join('')}</ul>
-    <label class="field"><span>Platform</span>
-      <select class="input" id="sale-platform">${PLATFORMS.map((p) => `<option>${p}</option>`).join('')}</select></label>
-    <label class="field"><span>Ontvangen bedrag (zonder verzending, na korting)</span>
-      <input class="input" id="sale-price" type="number" inputmode="decimal" step="0.01" min="0" value="${total}"></label>
-    <label class="field"><span>Datum</span><input class="input" id="sale-date" type="date" value="${today()}"></label>
-    <label class="check"><input type="checkbox" id="sale-bonus" ${total >= thr ? 'checked' : ''}>
-      Bonus vanaf ${eur(thr)}: steek bij elke bundel 1 extra blinkende kaart (${sel.length} kaarten)</label>
-    <div class="btn-row sticky-actions">
-      <button class="btn" data-action="close-sheet">Annuleren</button>
-      <button class="btn primary" data-action="confirm-sell">${icon('check', 18)} Verkocht</button>
-    </div>`, (el) => {
-    const price = el.querySelector('#sale-price');
-    const bonus = el.querySelector('#sale-bonus');
-    price.addEventListener('input', () => { bonus.checked = Number(price.value) >= thr; });
-  });
+// ----- Te verkopen -----
+
+const STEPS = [
+  ['online', 'Online'],
+  ['verzonden', 'Verzonden'],
+  ['ontvangen', 'Ontvangen'],
+  ['geld', 'Geld op rekening'],
+];
+
+function renderSell() {
+  const open = state.bundles.filter((b) => b.status === 'gemaakt');
+  const sel = open.filter((b) => state.pick.has(b.id));
+  const items = open.map((b) => {
+    const st = b.steps || {};
+    const chips = STEPS.map(([id, label]) => `
+      <button class="step ${st[id] ? 'done' : ''}" data-action="step" data-id="${b.id}" data-step="${id}">
+        ${st[id] ? icon('check', 14) : ''}<span>${label}</span>${st[id]?.at ? `<small>${esc(st[id].at.slice(5))}</small>` : ''}
+      </button>`).join('');
+    return `
+      <div class="sell-item ${state.pick.has(b.id) ? 'picked' : ''}">
+        <div class="sell-top">
+          <input type="checkbox" data-action="pick" data-id="${b.id}" ${state.pick.has(b.id) ? 'checked' : ''} aria-label="Selecteer ${esc(b.label)}">
+          <div class="made-main"><div class="opt-name">${esc(b.label)}</div><div class="muted small">${b.size} kaarten · gemaakt ${esc(b.createdAt)}</div></div>
+          <b>${eur(b.price)}</b>
+        </div>
+        <div class="steps">${chips}</div>
+        <button class="btn ghost small" data-action="unmake" data-id="${b.id}">Uit elkaar halen</button>
+      </div>`;
+  }).join('');
+  return `
+    <header class="page-head"><h1>Te verkopen</h1>
+      <p class="muted small">Tik op een status om ze af te vinken. Koopt iemand er meerdere, vink ze dan eerst aan: een status geldt dan voor de hele selectie.</p></header>
+    ${sel.length ? `<div class="callout">${sel.length} geselecteerd · ${eur(sel.reduce((s, b) => s + b.price, 0))}</div>` : ''}
+    ${items || '<div class="empty">Nog niets klaargemaakt. Ga naar Voorbereiding.</div>'}`;
 }
 
-async function confirmSell() {
-  const sel = state.bundles.filter((b) => state.pick.has(b.id) && b.status === 'gemaakt');
-  const sale = {
-    id: uid(),
-    platform: $('#sale-platform').value,
-    price: Number($('#sale-price').value) || 0,
-    date: $('#sale-date').value || today(),
-    bonus: $('#sale-bonus').checked,
-    bundleIds: sel.map((b) => b.id),
-    labels: sel.map((b) => b.label),
+function stepTargets(id) {
+  const b = state.bundles.find((x) => x.id === id);
+  if (!b) return [];
+  if (state.pick.has(id)) return state.bundles.filter((x) => state.pick.has(x.id) && x.status === 'gemaakt');
+  return [b];
+}
+
+function fillTemplate(tpl, vars) {
+  return String(tpl || '').split('\n').filter((line) => {
+    const keys = [...line.matchAll(/\{(\w+)\}/g)].map((m) => m[1]);
+    return keys.every((key) => vars[key] !== '' && vars[key] !== 0 && vars[key] !== undefined && vars[key] !== null);
+  }).map((line) => line.replace(/\{(\w+)\}/g, (m, key) => (vars[key] ?? m))).join('\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+function listingFor(b) {
+  const pk = packById(b.packId) || { kind: b.type === 'tin' ? 'tin' : 'bundle', name: b.name || b.label };
+  const S = state.settings;
+  const tag = (S.hashtag || '').replace(/^#/, '').trim();
+  const setLabel = b.setName || (b.ref && b.ref !== 'mix' && b.ref !== 'random' ? setName(b.ref) : '');
+  const vars = {
+    naam: pk.name || b.label,
+    kaarten: b.size,
+    cu: b.cu ?? (b.size - (b.shiny || 0)),
+    holo: b.shiny || 0,
+    energy: b.energy || 0,
+    extras: parseExtras(b.extras).map((x) => `${x.n} ${x.name}`).join(', '),
+    set: setLabel || 'verschillende Scarlet & Violet sets',
+    prijs: eur(b.price),
+    hashtag: tag ? `#${tag}` : '',
+    hashtagsoort: tag ? `#${tag}${pk.kind === 'tin' ? 'tins' : 'bundels'}` : '',
+    hashtagset: tag && setLabel ? `#${tag}${setLabel.replace(/[^A-Za-z0-9]/g, '')}` : '',
+    zoekwoorden: S.keywords || '',
   };
-  for (const b of sel) { b.status = 'verkocht'; b.saleId = sale.id; }
-  state.sales.unshift(sale);
-  state.pick.clear();
+  const kind = pk.kind === 'tin' ? 'tin' : 'bundle';
+  return {
+    title: fillTemplate(pk.title || TEMPLATES[`${kind}Title`], vars),
+    text: fillTemplate(pk.text || TEMPLATES[`${kind}Text`], vars),
+  };
+}
+
+function stepSheet(id, step) {
+  const targets = stepTargets(id);
+  if (!targets.length) return;
+  const label = STEPS.find(([s]) => s === step)[1];
+  const done = targets.every((b) => b.steps?.[step]);
+  const total = targets.reduce((s, b) => s + b.price, 0);
+  const thr = state.settings.bonusThreshold;
+  const names = `<ul class="kv">${targets.map((b) => `<li><span>${esc(b.label)}</span><b>${eur(b.price)}</b></li>`).join('')}</ul>`;
+  let body = '';
+  if (step === 'online') {
+    body = targets.map((b, i) => {
+      const l = listingFor(b);
+      return `
+        <div class="listing">
+          ${targets.length > 1 ? `<div class="acc-sub">${esc(b.label)}</div>` : ''}
+          <label class="field"><span>Titel</span><input class="input" readonly value="${esc(l.title)}" id="lt-${i}"></label>
+          <button class="btn small" data-action="copy" data-src="lt-${i}">${icon('copy', 16)} Titel kopiëren</button>
+          <label class="field"><span>Beschrijving</span><textarea class="input" rows="12" readonly id="ld-${i}">${esc(l.text)}</textarea></label>
+          <button class="btn small" data-action="copy" data-src="ld-${i}">${icon('copy', 16)} Beschrijving kopiëren</button>
+        </div>`;
+    }).join('');
+  } else if (step === 'geld') {
+    const bonus = targets.some((b) => b.steps?.verzonden?.bonus) || total >= thr;
+    body = `${names}
+      <label class="field"><span>Platform</span>
+        <select class="input" id="sale-platform">${PLATFORMS.map((p) => `<option>${p}</option>`).join('')}</select></label>
+      <label class="field"><span>Ontvangen bedrag (zonder verzending, na korting)</span>
+        <input class="input" id="sale-price" type="number" inputmode="decimal" step="0.01" min="0" value="${total}"></label>
+      <label class="field"><span>Datum</span><input class="input" id="step-date" type="date" value="${today()}"></label>
+      <label class="check"><input type="checkbox" id="sale-bonus" ${bonus ? 'checked' : ''}> Bonus (extra blinkende kaart) meegegeven</label>
+      <p class="muted small">Na bevestigen gaat dit naar Verkocht.</p>`;
+  } else {
+    body = `${names}
+      <label class="field"><span>Datum</span><input class="input" id="step-date" type="date" value="${today()}"></label>
+      ${step === 'verzonden' ? `<label class="check"><input type="checkbox" id="step-bonus" ${total >= thr ? 'checked' : ''}> Bonus vanaf ${eur(thr)}: 1 extra blinkende kaart per tin/bundel (${targets.length})</label>` : ''}`;
+  }
+  openSheet(`
+    <h2>${label}</h2>
+    ${body}
+    <div class="btn-row sticky-actions">
+      ${done && step !== 'geld' ? `<button class="btn ghost danger" data-action="step-clear" data-id="${id}" data-step="${step}">Status wissen</button>` : ''}
+      <button class="btn" data-action="close-sheet">Annuleren</button>
+      <button class="btn primary" data-action="step-ok" data-id="${id}" data-step="${step}">${icon('check', 18)} ${step === 'online' ? 'Staat online' : 'Bevestigen'}</button>
+    </div>`);
+}
+
+async function confirmStep(id, step) {
+  const targets = stepTargets(id);
+  const at = $('#step-date')?.value || today();
+  if (step === 'geld') {
+    const sale = {
+      id: uid(),
+      platform: $('#sale-platform').value,
+      price: Number($('#sale-price').value) || 0,
+      date: at,
+      bonus: $('#sale-bonus').checked,
+      bundleIds: targets.map((b) => b.id),
+      labels: targets.map((b) => b.label),
+    };
+    for (const b of targets) { b.steps = { ...(b.steps || {}), geld: { at } }; b.status = 'verkocht'; b.saleId = sale.id; state.pick.delete(b.id); }
+    state.sales.unshift(sale);
+    await save.bundles(); await save.sales();
+    closeSheet(); toast('Verkocht! Staat nu bij Verkocht.'); render();
+    return;
+  }
+  const extra = step === 'verzonden' ? { bonus: !!$('#step-bonus')?.checked } : {};
+  for (const b of targets) b.steps = { ...(b.steps || {}), [step]: { at, ...extra } };
   await save.bundles();
-  await save.sales();
   closeSheet();
-  toast(sale.bonus ? `Verkocht! Vergeet de ${sel.length} extra blinkende kaart(en) niet.` : 'Verkoop geregistreerd.');
+  if (extra.bonus) toast(`Vergeet de ${targets.length} extra blinkende kaart(en) niet.`);
   render();
+}
+
+async function clearStep(id, step) {
+  for (const b of stepTargets(id)) if (b.steps) delete b.steps[step];
+  await save.bundles();
+  closeSheet(); render();
 }
 
 // ----- Verkoop -----
@@ -919,7 +974,7 @@ function renderSales() {
       <button class="btn ghost small" data-action="undo-sale" data-id="${s.id}" title="Verkoop ongedaan maken">Ongedaan</button>
     </li>`).join('');
   return `
-    <header class="page-head"><h1>Verkoop</h1>
+    <header class="page-head"><h1>Verkocht</h1>
       <p class="muted small">${yearSales.length} ${yearSales.length === 1 ? 'verkoop' : 'verkopen'} · ${eur(total)} in ${year}. DAC7: platformen melden vanaf ${DAC7.sales} verkopen of meer dan ${eur(DAC7.revenue)} per jaar.</p></header>
     ${per}
     <section class="card"><h2>Alle verkopen</h2>${list ? `<ul class="sales">${list}</ul>` : '<p class="muted">Nog geen verkopen.</p>'}</section>`;
@@ -927,8 +982,8 @@ function renderSales() {
 
 async function undoSale(id) {
   const s = state.sales.find((x) => x.id === id);
-  if (!s || !confirm('Verkoop ongedaan maken? De bundels komen terug bij "Klaar voor verkoop".')) return;
-  for (const b of state.bundles) if (s.bundleIds.includes(b.id)) { b.status = 'gemaakt'; delete b.saleId; }
+  if (!s || !confirm('Verkoop ongedaan maken? De tins/bundels komen terug bij "Te verkopen".')) return;
+  for (const b of state.bundles) if (s.bundleIds.includes(b.id)) { b.status = 'gemaakt'; delete b.saleId; if (b.steps) delete b.steps.geld; }
   state.sales = state.sales.filter((x) => x.id !== id);
   await save.bundles();
   await save.sales();
@@ -937,6 +992,47 @@ async function undoSale(id) {
 
 // ----- Instellingen -----
 
+function packEditor(p) {
+  const sets = state.settings.mySets.map((id) => [id, setName(id)]).sort((x, y) => x[1].localeCompare(y[1]));
+  const src = [['mix', 'Alle sets gemengd'], ['perset', 'Per set (apart per set)'], ...sets]
+    .map(([v, l]) => `<option value="${esc(v)}" ${p.source === v ? 'selected' : ''}>${esc(l)}</option>`).join('');
+  const f = (field, label, type = 'number', extra = '') => `<label class="field"><span>${label}</span><input class="input" type="${type}" ${extra} value="${esc(p[field] ?? '')}" data-pack="${esc(p.id)}" data-pf="${field}"></label>`;
+  return `
+    <details class="pack" data-pack-open="${esc(p.id)}" ${state.openPack === p.id ? 'open' : ''}>
+      <summary><span class="acc-t">${esc(p.name)}</span><span class="acc-s">${esc(compText(p))} · ${eur(p.price)}</span></summary>
+      <div class="pack-b">
+        ${f('name', 'Naam', 'text')}
+        <label class="field"><span>Kaarten uit</span><select class="input" data-pack="${esc(p.id)}" data-pf="source">${src}</select></label>
+        <div class="four">
+          ${f('cu', 'Gewoon', 'number', 'min="0" inputmode="numeric"')}
+          ${f('shiny', 'Holo/rev.', 'number', 'min="0" inputmode="numeric"')}
+          ${f('energy', 'Energy', 'number', 'min="0" inputmode="numeric"')}
+          ${f('price', 'Prijs (€)', 'number', 'min="0" step="0.05" inputmode="decimal"')}
+        </div>
+        ${p.kind === 'tin' ? f('stock', 'Beschikbare tins', 'number', 'min="0" inputmode="numeric"') : ''}
+        ${f('extras', 'Extra (bv. 1 sticker, 1 coin)', 'text')}
+        ${f('title', 'Titel zoekertje', 'text')}
+        <label class="field"><span>Tekst zoekertje</span><textarea class="input" rows="10" data-pack="${esc(p.id)}" data-pf="text">${esc(p.text || '')}</textarea></label>
+        <div class="btn-row">
+          <button class="btn small" data-action="pack-move" data-pack="${esc(p.id)}" data-dir="-1">Omhoog</button>
+          <button class="btn small" data-action="pack-move" data-pack="${esc(p.id)}" data-dir="1">Omlaag</button>
+          <button class="btn small" data-action="pack-reset-text" data-pack="${esc(p.id)}">Standaardtekst</button>
+          <button class="btn ghost small danger" data-action="pack-remove" data-pack="${esc(p.id)}">Verwijderen</button>
+        </div>
+      </div>
+    </details>`;
+}
+
+function packList(kind) {
+  const list = kind === 'tin' ? tinPacks() : bundlePacks();
+  return `
+    <p class="muted small">${kind === 'tin'
+    ? 'Tins krijgen in de analyse altijd voorrang, in deze volgorde. "Gewoon" = common/uncommon uit je inventaris; holo/reverse, energy en extra\'s neem je er zelf bij.'
+    : 'Bundels komen na de tins, in deze volgorde. Zet een bundel "uit alle sets gemengd" onderaan: die krijgt het overschot.'}</p>
+    <div class="packs">${list.map(packEditor).join('') || '<p class="muted small">Nog geen.</p>'}</div>
+    <div class="btn-row"><button class="btn small" data-action="pack-add" data-kind="${kind}">${icon('plus', 16)} ${kind === 'tin' ? 'Tin' : 'Bundel'} toevoegen</button></div>`;
+}
+
 function renderSettings() {
   const S = state.settings;
   const acc = (id, title, sum, body) => `
@@ -944,32 +1040,15 @@ function renderSettings() {
       <summary><span class="acc-t">${title}</span><span class="acc-s">${sum}</span></summary>
       <div class="acc-b">${body}</div>
     </details>`;
-  const bundleField = (key, label) => `
-    <div class="acc-sub">${label}</div>
-    <div class="three">
-      <label class="field"><span>Kaarten</span><input class="input" type="number" min="1" data-setting="${key}.size" value="${S[key].size}"></label>
-      <label class="field"><span>Holo/reverse</span><input class="input" type="number" min="0" data-setting="${key}.shiny" value="${S[key].shiny}"></label>
-      <label class="field"><span>Prijs (€)</span><input class="input" type="number" min="0" step="0.5" data-setting="${key}.price" value="${S[key].price}"></label>
-    </div>`;
   return `
     <header class="page-head"><h1>Instellingen</h1></header>
     <div class="accs">
-    ${acc('bundles', 'Bundels', `per set ${eur(S.setBundle.price)} · random ${eur(S.randomBundle.price)}`,
-      bundleField('setBundle', 'Bundel per set') + bundleField('randomBundle', 'Random pick'))}
-    ${acc('tins', 'Tins', S.tins.length ? `${S.tins.reduce((s, t) => s + t.stock, 0)} op voorraad` : 'geen', `
-      <p class="muted small">Een tin is een verpakking met een eigen aantal kaarten en prijs. Bij "Maak" gaat de voorraad met 1 omlaag.</p>
-      ${S.tins.map((t) => `
-        <div class="tin-edit">
-          <label class="field"><span>Naam</span><input class="input" value="${esc(t.name)}" data-tin="${esc(t.id)}" data-tin-field="name"></label>
-          <div class="four">
-            <label class="field"><span>Voorraad</span><input class="input" type="number" min="0" value="${t.stock}" data-tin="${esc(t.id)}" data-tin-field="stock"></label>
-            <label class="field"><span>Kaarten</span><input class="input" type="number" min="1" value="${t.size}" data-tin="${esc(t.id)}" data-tin-field="size"></label>
-            <label class="field"><span>Holo/rev.</span><input class="input" type="number" min="0" value="${t.shiny}" data-tin="${esc(t.id)}" data-tin-field="shiny"></label>
-            <label class="field"><span>Prijs (€)</span><input class="input" type="number" min="0" step="0.05" value="${t.price}" data-tin="${esc(t.id)}" data-tin-field="price"></label>
-          </div>
-          <button class="btn ghost small danger" data-action="remove-tin" data-tin="${esc(t.id)}">Verwijderen</button>
-        </div>`).join('')}
-      <div class="btn-row"><button class="btn small" data-action="add-tin">${icon('plus', 16)} Tin toevoegen</button></div>`)}
+    ${acc('tins', 'Tins', `${tinPacks().length} soorten · ${tinPacks().reduce((n, p) => n + (p.stock || 0), 0)} beschikbaar`, packList('tin'))}
+    ${acc('bundles', 'Bundels', `${bundlePacks().length} soorten`, packList('bundle'))}
+    ${acc('listing', 'Zoekertjes', `#${esc(S.hashtag || '')}`, `
+      <label class="field"><span>Eigen hashtag (zonder #)</span><input class="input" value="${esc(S.hashtag || '')}" data-text-setting="hashtag"></label>
+      <label class="field"><span>Zoekwoorden onderaan</span><textarea class="input" rows="4" data-text-setting="keywords">${esc(S.keywords || '')}</textarea></label>
+      <p class="muted small">Invulvelden in de teksten van tins en bundels: {naam} {kaarten} {cu} {holo} {energy} {extras} {set} {prijs} {hashtag} {hashtagsoort} {hashtagset} {zoekwoorden}. Een regel waarin een invulveld leeg of 0 is, valt weg.</p>`)}
     ${acc('bonus', 'Bonus', `extra blinkende kaart vanaf ${eur(S.bonusThreshold)}`, `
       <label class="field"><span>Extra blinkende kaart per bundel vanaf (€)</span>
       <input class="input" type="number" min="0" data-setting="bonusThreshold" value="${S.bonusThreshold}"></label>`)}
@@ -1006,7 +1085,7 @@ async function restoreBackup(file) {
     const data = JSON.parse(await file.text());
     if (data.app !== 'PokeBundels' || data.type !== 'backup') throw new Error('Dit is geen PokeBundels-back-up.');
     if (!confirm('Je huidige gegevens worden vervangen door de back-up. Doorgaan?')) return;
-    state.settings = { ...structuredClone(DEFAULT_SETTINGS), ...data.settings };
+    state.settings = migrateSettings(data.settings);
     state.inventory = data.inventory || {};
     state.bundles = data.bundles || [];
     state.sales = data.sales || [];
@@ -1084,38 +1163,62 @@ async function onClick(e) {
       render();
       break;
     }
-    case 'mode': state.mode = Number(el.dataset.k); render(); break;
-    case 'reanalyse': state.analysisCache = {}; render(); toast('Opnieuw berekend.'); break;
-    case 'use-plan': state.settings.activeMode = Number(el.dataset.k); await save.settings(); state.view = 'bun'; render(); toast('Plan actief.'); break;
-    case 'make': makeSheet(el.dataset.type, el.dataset.ref); break;
-    case 'make-tin': {
-      const src = document.querySelector(`[data-tin-src="${CSS.escape(el.dataset.tin)}"]`)?.value;
-      if (!src) { toast('Geen kaarten om deze tin te vullen.'); break; }
-      makeSheet('tin', tinRef(el.dataset.tin, src));
-      break;
-    }
-    case 'add-tin':
-      state.settings.tins.push({ id: uid(), name: 'Mini tin', stock: 0, size: 25, shiny: 2, price: 4.95 });
-      state.openAcc = 'tins';
-      await save.settings(); render(); break;
-    case 'remove-tin': {
-      const t = state.settings.tins.find((x) => x.id === el.dataset.tin);
-      if (!t || !confirm(`"${t.name}" verwijderen? Gemaakte tin-bundels blijven bestaan.`)) break;
-      state.settings.tins = state.settings.tins.filter((x) => x !== t);
-      await save.settings(); render(); break;
-    }
-    case 'confirm-make': await confirmMake(el.dataset.type, el.dataset.ref); break;
+    case 'sub': state.sub[el.dataset.view] = el.dataset.sub; render(); break;
+    case 'mode': state.settings.activeMode = Number(el.dataset.k); await save.settings(); render(); break;
+    case 'start-analysis': startAnalysisSheet(); break;
+    case 'run-analysis': await runAnalysis(); break;
+    case 'make': makeSheet(el.dataset.key); break;
+    case 'confirm-make': await confirmMake(el.dataset.key); break;
     case 'unmake': e.preventDefault(); await unmake(el.dataset.id); break;
     case 'pick': {
-      const id = el.dataset.id;
-      if (el.checked) state.pick.add(id); else state.pick.delete(id);
-      const sel = state.bundles.filter((b) => state.pick.has(b.id));
-      const btn = document.querySelector('[data-action="sell"]');
-      if (btn) { btn.disabled = !sel.length; btn.textContent = `Verkoop selectie (${sel.length}) · ${eur(sel.reduce((s, b) => s + b.price, 0))}`; }
+      if (el.checked) state.pick.add(el.dataset.id); else state.pick.delete(el.dataset.id);
+      render();
       break;
     }
-    case 'sell': sellSheet(); break;
-    case 'confirm-sell': await confirmSell(); break;
+    case 'step': stepSheet(el.dataset.id, el.dataset.step); break;
+    case 'step-ok': await confirmStep(el.dataset.id, el.dataset.step); break;
+    case 'step-clear': await clearStep(el.dataset.id, el.dataset.step); break;
+    case 'copy': {
+      const src = document.getElementById(el.dataset.src);
+      if (!src) break;
+      try { await navigator.clipboard.writeText(src.value); toast('Gekopieerd.'); }
+      catch { src.select(); document.execCommand('copy'); toast('Gekopieerd.'); }
+      break;
+    }
+    case 'pack-add': {
+      const kind = el.dataset.kind;
+      const base = defaultPacks().find((p) => p.kind === kind && (kind === 'tin' ? p.id === 'tin' : p.id === 'random'));
+      const p = { ...base, id: uid(), name: kind === 'tin' ? 'Nieuwe tin' : 'Nieuwe bundel', stock: kind === 'tin' ? 0 : null };
+      const at = kind === 'tin' ? state.settings.packs.filter((x) => x.kind === 'tin').length : state.settings.packs.length;
+      state.settings.packs.splice(at, 0, p);
+      state.openPack = p.id; state.openAcc = kind === 'tin' ? 'tins' : 'bundles';
+      await save.settings(); render(); break;
+    }
+    case 'pack-move': {
+      const list = state.settings.packs;
+      const p = packById(el.dataset.pack);
+      const same = list.filter((x) => (x.kind === 'tin') === (p.kind === 'tin'));
+      const i2 = same.indexOf(p) + Number(el.dataset.dir);
+      if (i2 < 0 || i2 >= same.length) break;
+      const other = same[i2];
+      const a1 = list.indexOf(p), a2 = list.indexOf(other);
+      [list[a1], list[a2]] = [list[a2], list[a1]];
+      state.openPack = p.id;
+      await save.settings(); render(); break;
+    }
+    case 'pack-reset-text': {
+      const p = packById(el.dataset.pack);
+      const kind = p.kind === 'tin' ? 'tin' : 'bundle';
+      p.title = TEMPLATES[`${kind}Title`]; p.text = TEMPLATES[`${kind}Text`];
+      state.openPack = p.id;
+      await save.settings(); render(); toast('Standaardtekst teruggezet.'); break;
+    }
+    case 'pack-remove': {
+      const p = packById(el.dataset.pack);
+      if (!p || !confirm(`"${p.name}" verwijderen? Al gemaakte tins/bundels blijven bestaan.`)) break;
+      state.settings.packs = state.settings.packs.filter((x) => x !== p);
+      await save.settings(); render(); break;
+    }
     case 'undo-sale': await undoSale(el.dataset.id); break;
     case 'export': await exportBackup(); break;
     case 'check-update': await checkUpdate(); break;
@@ -1143,30 +1246,27 @@ async function onChange(e) {
   const el = e.target;
   if (el.dataset.input === 'count') requestCount(el.dataset.card, Number(el.value));
   if (el.dataset.input === 'restore' && el.files?.[0]) await restoreBackup(el.files[0]);
-  if (el.dataset.tinSrc) state.tinSource[el.dataset.tinSrc] = el.value;
-  if (el.dataset.tinField) {
-    const t = state.settings.tins.find((x) => x.id === el.dataset.tin);
-    if (!t) return;
-    const f = el.dataset.tinField;
-    if (f === 'name') t.name = el.value.trim() || 'Tin';
+  if (el.dataset.pf) {
+    const p = packById(el.dataset.pack);
+    if (!p) return;
+    const f = el.dataset.pf;
+    if (['name', 'extras', 'title', 'text', 'source'].includes(f)) p[f] = f === 'name' ? (el.value.trim() || p.name) : el.value;
     else {
       const v = Number(el.value);
-      if (!Number.isFinite(v) || v < 0) return;
-      t[f] = f === 'price' ? v : Math.round(v);
-      if (t.shiny >= t.size) { toast('Aantal holo/reverse moet kleiner zijn dan het aantal kaarten.'); return; }
+      if (!Number.isFinite(v) || v < 0) { toast('Ongeldig getal.'); return; }
+      p[f] = f === 'price' ? v : Math.round(v);
     }
     state.analysisCache = {};
     await save.settings();
   }
+  if (el.dataset.textSetting) {
+    state.settings[el.dataset.textSetting] = el.dataset.textSetting === 'hashtag' ? el.value.replace(/[#\s]/g, '') : el.value;
+    await save.settings();
+  }
   if (el.dataset.setting) {
-    const path = el.dataset.setting.split('.');
     const v = Number(el.value);
     if (!Number.isFinite(v) || v < 0) return;
-    if (path.length === 2) state.settings[path[0]][path[1]] = v; else state.settings[path[0]] = v;
-    if (path[1] === 'shiny' && state.settings[path[0]].shiny >= state.settings[path[0]].size) {
-      toast('Aantal holo/reverse moet kleiner zijn dan het aantal kaarten.');
-      return;
-    }
+    state.settings[el.dataset.setting] = v;
     state.analysisCache = {};
     await save.settings();
   }
@@ -1189,6 +1289,10 @@ async function start() {
   $('#upd').addEventListener('click', () => { if (swWaiting) swWaiting.postMessage('skip'); else location.reload(); });
   document.addEventListener('toggle', (e) => {
     const d = e.target;
+    if (d.dataset?.packOpen) {
+      if (d.open) state.openPack = d.dataset.packOpen; else if (state.openPack === d.dataset.packOpen) state.openPack = null;
+      return;
+    }
     if (d.dataset?.era) {
       if (d.open) state.openEras.add(d.dataset.era); else state.openEras.delete(d.dataset.era);
       saveOpenEras();

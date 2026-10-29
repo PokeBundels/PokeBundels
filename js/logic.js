@@ -1,14 +1,95 @@
 // PokeBundels — pure rekenlogica (geen DOM, testbaar in Node)
 
+// Standaardteksten voor zoekertjes. Invulvelden: {naam} {kaarten} {cu} {holo} {energy} {extras} {set} {prijs}
+// {hashtag} {hashtagsoort} {hashtagset} {zoekwoorden}. Een regel waarin een invulveld leeg of 0 is, valt weg.
+export const TEMPLATES = {
+  tinTitle: '{naam} met {kaarten} Pokémon kaarten ({set})',
+  tinText: [
+    '{naam} gevuld met {kaarten} Engelse Pokémon kaarten uit {set}.',
+    '• {cu} gewone kaarten (common/uncommon)',
+    '• {holo} blinkende kaarten (holo/reverse)',
+    '• {energy} energy',
+    '• Extra: {extras}',
+    'Geen dubbels in de tin.',
+    '',
+    'Zelf uit boosters getrokken, overschot van mijn eigen verzameling.',
+    'Leuk als cadeautje of om een verzameling mee te beginnen.',
+    '',
+    '{hashtag} {hashtagsoort} {hashtagset}',
+    '',
+    '{zoekwoorden}',
+  ].join('\n'),
+  bundleTitle: 'Pokémon kaarten setje – {kaarten} kaarten {set}',
+  bundleText: [
+    'Setje van {kaarten} Engelse Pokémon kaarten uit {set}.',
+    '• {cu} gewone kaarten (common/uncommon)',
+    '• {holo} blinkende kaarten (holo/reverse)',
+    '• {energy} energy',
+    '• Extra: {extras}',
+    'Geen dubbels in het setje.',
+    '',
+    'Zelf uit boosters getrokken, overschot van mijn eigen verzameling.',
+    'Je krijgt de kaarten van de foto’s.',
+    '',
+    '{hashtag} {hashtagsoort} {hashtagset}',
+    '',
+    '{zoekwoorden}',
+  ].join('\n'),
+};
+
+const pack = (id, kind, name, cu, shiny, price, source, extra = {}) => ({
+  id, kind, name, cu, shiny, energy: 0, extras: '', source, price,
+  stock: kind === 'tin' ? 0 : null,
+  title: kind === 'tin' ? TEMPLATES.tinTitle : TEMPLATES.bundleTitle,
+  text: kind === 'tin' ? TEMPLATES.tinText : TEMPLATES.bundleText,
+  ...extra,
+});
+
+/** Standaard verpakkingen. Tins krijgen altijd voorrang in de analyse, daarna bundels, in de volgorde van de lijst. */
+export function defaultPacks() {
+  return [
+    pack('mini', 'tin', 'Mini tin', 23, 2, 4.95, 'mix'),
+    pack('tin', 'tin', 'Tin', 45, 5, 9.95, 'mix'),
+    pack('stack', 'tin', 'Stack tin', 45, 5, 9.95, 'mix'),
+    pack('pen', 'tin', 'Pennenzak tin', 45, 5, 9.95, 'mix'),
+    pack('set', 'bundle', 'Setbundel', 45, 5, 6.5, 'perset'),
+    pack('random', 'bundle', 'Random bundel', 45, 5, 5, 'mix'),
+  ];
+}
+
 export const DEFAULT_SETTINGS = {
-  setBundle: { size: 50, shiny: 5, price: 5 },
-  randomBundle: { size: 50, shiny: 5, price: 4.5 },
+  packs: defaultPacks(),
   activeMode: 1,
   bonusThreshold: 25,
+  hashtag: 'pokebundelsbe',
+  keywords: 'pokemon pokémon pokemonkaarten pokemoncards kaarten scarlet violet cadeau cadeautje cadeautip verjaardag verjaardagscadeau sinterklaas kerst verzamelen setje bundel tradingcards tcg',
   mySets: [],
-  tins: [], // [{id, name, stock, size, shiny, price}] — verpakkingen met eigen bundelgrootte en prijs
   rareOk: [], // kaarten zonder common/uncommon die je bewust aan je voorraad toevoegde
 };
+
+/** Oude instellingen (setBundle/randomBundle/tins) omzetten naar packs. */
+export function migrateSettings(saved) {
+  const out = { ...structuredClone(DEFAULT_SETTINGS), ...(saved || {}) };
+  if (!saved?.packs) {
+    const packs = defaultPacks();
+    const setB = packs.find((p) => p.id === 'set');
+    const rndB = packs.find((p) => p.id === 'random');
+    if (saved?.setBundle) Object.assign(setB, { cu: saved.setBundle.size - saved.setBundle.shiny, shiny: saved.setBundle.shiny, price: saved.setBundle.price });
+    if (saved?.randomBundle) Object.assign(rndB, { cu: saved.randomBundle.size - saved.randomBundle.shiny, shiny: saved.randomBundle.shiny, price: saved.randomBundle.price });
+    for (const t of saved?.tins || []) {
+      packs.splice(packs.findIndex((p) => p.kind === 'bundle'), 0,
+        pack(t.id, 'tin', t.name, Math.max(0, t.size - t.shiny), t.shiny, t.price, 'mix', { stock: t.stock }));
+    }
+    out.packs = packs;
+  }
+  for (const k of ['setBundle', 'randomBundle', 'tins', 'themeBundle', 'themes', 'themesFromPremium', 'premiumSets', 'premiumBundle', 'premiumRestToRandom']) delete out[k];
+  return out;
+}
+
+/** Tins eerst, daarna bundels; binnen elk soort de volgorde uit de instellingen. */
+export function orderedPacks(packs) {
+  return [...packs.filter((p) => p.kind === 'tin'), ...packs.filter((p) => p.kind !== 'tin')];
+}
 
 export const MODES = [
   { k: 1, label: 'Geen dubbels' },
@@ -96,7 +177,7 @@ export function pickOne(pool, n, k, tiebreak) {
  * Voorwaarde: met wat overblijft moeten nog B-1 bundels te maken zijn, zodat je er geen verliest.
  * cards: [{id,count}], avoid: Set van kaart-ids. Geeft [{id,count}] of null.
  */
-export function pickVaried(cards, n, k, B, avoid = new Set(), rnd = Math.random) {
+export function pickVaried(cards, n, k, B, avoid = new Set(), rnd = Math.random, check = null) {
   if (B <= 0) return null;
   const base = cards.filter((c) => c.count > 0);
   const r = new Map(base.map((c) => [c.id, rnd()]));
@@ -105,7 +186,8 @@ export function pickVaried(cards, n, k, B, avoid = new Set(), rnd = Math.random)
     if (!bundle) return false;
     const taken = new Map(bundle.map((x) => [x.id, x.count]));
     const rest = base.map((c) => c.count - (taken.get(c.id) || 0));
-    return B - 1 === 0 || maxBundles(rest, n, k) >= B - 1;
+    if (!(B - 1 === 0 || maxBundles(rest, n, k) >= B - 1)) return false;
+    return !check || check(bundle);
   };
   // Vaste volgorde aflopen: k exemplaren per kaart zolang de bundel niet vol is.
   const byOrder = (order) => {
@@ -134,9 +216,9 @@ export function pickVaried(cards, n, k, B, avoid = new Set(), rnd = Math.random)
 }
 
 /** Verdeel zo veel mogelijk bundels uit een lijst kaarten [{id,count}]. */
-export function allocate(cards, n, k, tiebreak) {
+export function allocate(cards, n, k, tiebreak, cap = Infinity) {
   const counts = cards.map((c) => c.count).filter((c) => c > 0);
-  let B = maxBundles(counts, n, k);
+  let B = Math.min(cap, maxBundles(counts, n, k));
   while (B > 0) {
     const pool = new Map(cards.filter((c) => c.count > 0).map((c) => [c.id, c.count]));
     const bundles = [];
@@ -157,77 +239,72 @@ export function allocate(cards, n, k, tiebreak) {
 
 const sum = (arr) => arr.reduce((a, c) => a + c.count, 0);
 
+/** "1 sticker, 2 coins" -> [{name:'sticker', n:1}, {name:'coins', n:2}] */
+export function parseExtras(text) {
+  return String(text || '').split(',').map((t) => t.trim()).filter(Boolean).map((t) => {
+    const m = t.match(/^(\d+)\s*[x×]?\s*(.+)$/i);
+    return m ? { name: m[2].trim(), n: Number(m[1]) } : { name: t, n: 1 };
+  });
+}
+
 /**
- * Volledige analyse voor één modus k.
- * cards: [{id, setId, localId, name, rarity, category, count}] — alle kaarten in voorraad.
- * setNames: {setId: naam}
+ * Plan voor één modus k (max. k keer dezelfde kaart per tin/bundel).
+ * Tins eerst (zoveel als er op voorraad zijn), daarna bundels, in de volgorde uit de instellingen.
+ * Bron per verpakking: 'mix' (alle sets samen), 'perset' (per set apart) of een set-ID.
+ * cards: [{id, setId, localId, name, rarity, count}]
+ * Geeft {k, units:[{key, packId, kind, ref, name, label, count, bundles, pool, n, ...}], leftover, summary}.
  */
-export function analyse(cards, settings, k, setNames = {}) {
+export function analysePlan(cards, settings, k, setNames = {}) {
   const eligible = cards.filter((c) => c.count > 0 && isBundleCard(c, settings.rareOk || []));
   const byId = new Map(eligible.map((c) => [c.id, c]));
+  const remaining = new Map(eligible.map((c) => [c.id, c.count]));
   const order = (a, b) => {
     const A = byId.get(a), Bc = byId.get(b);
     if (!A || !Bc) return 0;
     if (A.setId !== Bc.setId) return A.setId < Bc.setId ? -1 : 1;
     return String(A.localId).localeCompare(String(Bc.localId), undefined, { numeric: true });
   };
+  const setIds = [...new Set(eligible.map((c) => c.setId))].sort((a, b) => (setNames[a] || a).localeCompare(setNames[b] || b));
+  const poolOf = (src) => [...remaining]
+    .filter(([id, c]) => c > 0 && (src === 'mix' || byId.get(id).setId === src))
+    .map(([id, count]) => ({ id, count }));
 
-  const setPools = {};
-  for (const c of eligible) (setPools[c.setId] ||= []).push({ id: c.id, count: c.count });
-
-  const randomPool = [];
-
-  // 1. Sets
-  const setRes = {};
-  for (const [setId, pool] of Object.entries(setPools)) {
-    const cfg = settings.setBundle;
-    const n = cfg.size - cfg.shiny;
-    const { bundles, leftover } = allocate(pool, n, k, order);
-    setRes[setId] = {
-      setId, name: setNames[setId] || setId, bundles, pool,
-      unique: pool.length, total: sum(pool), rest: sum(leftover),
-      price: cfg.price, shiny: cfg.shiny, size: cfg.size,
-    };
-    randomPool.push(...leftover);
+  const units = [];
+  for (const p of orderedPacks(settings.packs || [])) {
+    const n = Math.max(0, Math.round(p.cu || 0));
+    let cap = p.kind === 'tin' ? Math.max(0, Math.round(p.stock || 0)) : Infinity;
+    const sources = p.source === 'perset' ? setIds : [p.source || 'mix'];
+    for (const src of sources) {
+      const pool = n > 0 ? poolOf(src) : [];
+      const { bundles } = n > 0 && cap > 0 ? allocate(pool, n, k, order, cap) : { bundles: [] };
+      for (const b of bundles) for (const x of b) remaining.set(x.id, remaining.get(x.id) - x.count);
+      if (cap !== Infinity) cap -= bundles.length;
+      const setName = src === 'mix' ? '' : (setNames[src] || src);
+      units.push({
+        key: `${p.id}|${src}`, packId: p.id, kind: p.kind, ref: src, name: p.name, setName,
+        label: setName ? `${p.name} · ${setName}` : p.name,
+        count: bundles.length, bundles, pool, n,
+        shiny: p.shiny || 0, energy: p.energy || 0, extras: p.extras || '', price: p.price || 0,
+        size: n + (p.shiny || 0) + (p.energy || 0),
+      });
+    }
   }
 
-  // 2. Random (overschot uit gewone sets)
-  const rb = settings.randomBundle;
-  // zelfde kaart kan uit meerdere restlijsten komen → samenvoegen
-  const merged = new Map();
-  for (const x of randomPool) merged.set(x.id, (merged.get(x.id) || 0) + x.count);
-  const randomCards = [...merged].map(([id, count]) => ({ id, count }));
-  const rnd = allocate(randomCards, rb.size - rb.shiny, k, order);
-  const randomRes = {
-    bundles: rnd.bundles, pool: randomCards, unique: randomCards.length, total: sum(randomCards), rest: sum(rnd.leftover),
-    price: rb.price, shiny: rb.shiny, size: rb.size,
-    shinyBySet: {},
-  };
-  // uit welke sets komen de random-kaarten (voor de holo/reverse-tip)
-  for (const b of rnd.bundles) for (const x of b) {
-    const s = byId.get(x.id).setId;
-    randomRes.shinyBySet[s] = (randomRes.shinyBySet[s] || 0) + x.count;
+  const leftover = [...remaining].reduce((a, [, c]) => a + c, 0);
+  const total = eligible.reduce((a, c) => a + c.count, 0);
+  const extras = {};
+  let tins = 0, bundlesN = 0, revenue = 0, shiny = 0, energy = 0;
+  for (const u of units) {
+    if (!u.count) continue;
+    if (u.kind === 'tin') tins += u.count; else bundlesN += u.count;
+    revenue += u.count * u.price;
+    shiny += u.count * u.shiny;
+    energy += u.count * u.energy;
+    for (const x of parseExtras(u.extras)) extras[x.name] = (extras[x.name] || 0) + x.n * u.count;
   }
-
-  // Samenvatting
-  const shinyNeed = {}; // setId -> aantal
-  let bundleCount = 0, revenue = 0;
-  for (const s of Object.values(setRes)) {
-    if (!s.bundles.length) continue;
-    shinyNeed[s.setId] = (shinyNeed[s.setId] || 0) + s.bundles.length * s.shiny;
-    bundleCount += s.bundles.length;
-    revenue += s.bundles.length * s.price;
-  }
-  const randomShiny = rnd.bundles.length * rb.shiny;
-  bundleCount += rnd.bundles.length;
-  revenue += rnd.bundles.length * rb.price;
-
   return {
-    k, sets: setRes, random: randomRes,
-    summary: {
-      bundleCount, revenue, shinyNeed, randomShiny,
-      shinyTotal: Object.values(shinyNeed).reduce((a, c) => a + c, 0) + randomShiny,
-    },
+    k, units, leftover,
+    summary: { tins, bundles: bundlesN, revenue, shiny, energy, extras, total, used: total - leftover, leftover },
   };
 }
 
