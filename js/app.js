@@ -6,7 +6,7 @@ import {
   MODES, TEMPLATES, analysePlan, defaultPacks, migrateSettings, parseExtras, isNonShiny, isNonHoloRare, isBundleCard, normNr, parseImport, pickVaried,
 } from './logic.js';
 
-const VERSION = '2.2.0';
+const VERSION = '2.3.0';
 const DAC7 = { sales: 30, revenue: 2000 };
 const PLATFORMS = ['Vinted', '2dehands', 'Anders'];
 
@@ -597,6 +597,10 @@ function renderAnalysis() {
       <p class="muted small">Eerst zoveel mogelijk tins, daarna bundels. Alles volgens je instellingen.</p></header>
     ${subTabs('ana', [['overzicht', 'Overzicht'], ['tins', 'Tins'], ['bundels', 'Bundels']])}`;
   if (!inventoryCards().length) return `${head}<div class="empty">Nog geen kaarten in voorraad.</div>`;
+  const startBtn = `<div class="btn-row"><button class="btn primary" data-action="start-analysis">${icon('refresh', 18)} Analyse starten</button></div>`;
+  if (!state.settings.analysedAt) {
+    return `${head}${startBtn}<div class="empty">Nog geen analyse. Tik op <b>Analyse starten</b> en geef op hoeveel tins je hebt.</div>`;
+  }
   const a = getAnalysis(k);
   const sub = state.sub.ana;
   if (sub === 'tins' || sub === 'bundels') {
@@ -605,27 +609,40 @@ function renderAnalysis() {
     const body = packs.map((p) => {
       const units = a.units.filter((u) => u.packId === p.id);
       const n = units.reduce((s, u) => s + u.count, 0);
-      const rows = p.source === 'perset' ? units.filter((u) => u.count).map((u) => `<li><span>${esc(u.setName)}</span><b>${u.count}×</b></li>`).join('') : '';
+      const rows = p.source === 'perset' ? units.filter((u) => u.count).map((u) => `<li><span>${esc(u.setName)}</span><b>${u.count}× · ${eur(u.count * u.price)}</b></li>`).join('') : '';
       return `
         <section class="card">
           <h2>${esc(p.name)} <span class="opt-n">${n}×</span></h2>
-          <p class="muted small">${esc(compText(p))} · ${esc(sourceName(p.source))} · ${eur(p.price)}${kind === 'tin' ? ` · ${p.stock || 0} tins beschikbaar` : ''}</p>
+          <p class="muted small">${esc(compText(p))} · ${esc(sourceName(p.source))} · ${eur(p.price)} per stuk${kind === 'tin' ? ` · ${p.stock || 0} tins beschikbaar` : ''}</p>
+          <ul class="kv"><li><span>Opbrengst</span><b>${eur(n * (p.price || 0))}</b></li></ul>
           ${rows ? `<ul class="kv">${rows}</ul>` : ''}
           ${kind === 'tin' && n < (p.stock || 0) ? `<p class="small warn">Niet genoeg kaarten voor alle ${p.stock} tins.</p>` : ''}
         </section>`;
     }).join('');
-    return `${head}${body || `<div class="empty">Geen ${sub} ingesteld. Voeg ze toe in Instellingen.</div>`}`;
+    const tot = a.units.filter((u) => u.kind === kind).reduce((s2, u) => s2 + u.count * u.price, 0);
+    const cnt = a.units.filter((u) => u.kind === kind).reduce((s2, u) => s2 + u.count, 0);
+    return `${head}${body ? `<div class="stats"><div class="stat"><b>${cnt}</b><span>${sub}</span></div><div class="stat"><b>${eur(tot)}</b><span>opbrengst</span></div></div>${body}` : `<div class="empty">Geen ${sub} ingesteld. Voeg ze toe in Instellingen.</div>`}`;
   }
   const S = a.summary;
+  const revOf = (kind) => a.units.filter((u) => u.kind === kind).reduce((s2, u) => s2 + u.count * u.price, 0);
   const extras = Object.entries(S.extras).map(([nm, n]) => `<li><span>${esc(nm)}</span><b>${n}</b></li>`).join('');
   const tabs = MODES.map((m) => `<button class="seg ${m.k === k ? 'on' : ''}" data-action="mode" data-k="${m.k}">${m.label}</button>`).join('');
   return `${head}
-    <div class="btn-row"><button class="btn primary" data-action="start-analysis">${icon('refresh', 18)} Analyse starten</button></div>
+    ${startBtn}
+    <p class="muted small">Laatste analyse: ${esc(state.settings.analysedAt)}</p>
     <div class="stats">
       <div class="stat"><b>${S.tins}</b><span>tins</span></div>
       <div class="stat"><b>${S.bundles}</b><span>bundels</span></div>
       <div class="stat"><b>${eur(S.revenue)}</b><span>opbrengst</span></div>
     </div>
+    <section class="card">
+      <h2>Opbrengst</h2>
+      <ul class="kv">
+        <li><span>Tins (${S.tins})</span><b>${eur(revOf('tin'))}</b></li>
+        <li><span>Bundels (${S.bundles})</span><b>${eur(revOf('bundle'))}</b></li>
+        <li><span>Totaal</span><b>${eur(S.revenue)}</b></li>
+      </ul>
+    </section>
     <section class="card">
       <h2>Kaarten</h2>
       <ul class="kv">
@@ -654,7 +671,7 @@ function startAnalysisSheet() {
     <h2>Analyse starten</h2>
     <p class="muted small">Hoeveel tins heb je ter beschikking? De analyse vult eerst zoveel mogelijk tins.</p>
     ${tins.map((p) => `<label class="field"><span>${esc(p.name)} <span class="muted small">(${esc(compText(p))})</span></span>
-      <input class="input" type="number" min="0" inputmode="numeric" value="${p.stock || 0}" data-start-tin="${esc(p.id)}"></label>`).join('') || '<p class="muted">Geen tins ingesteld (Instellingen → Tins).</p>'}
+      <input class="input" type="number" min="0" inputmode="numeric" value="" placeholder="0" data-start-tin="${esc(p.id)}"></label>`).join('') || '<p class="muted">Geen tins ingesteld (Instellingen → Tins).</p>'}
     <div class="btn-row sticky-actions">
       <button class="btn" data-action="close-sheet">Annuleren</button>
       <button class="btn primary" data-action="run-analysis">${icon('check', 18)} Analyse maken</button>
@@ -666,6 +683,7 @@ async function runAnalysis() {
     const p = packById(inp.dataset.startTin);
     if (p) p.stock = Math.max(0, Math.round(Number(inp.value) || 0));
   }
+  state.settings.analysedAt = new Date().toLocaleString('nl-BE', { dateStyle: 'short', timeStyle: 'short' });
   await save.settings();
   state.analysisCache = {};
   state.sub.ana = 'overzicht';
@@ -677,6 +695,10 @@ async function runAnalysis() {
 // ----- Voorbereiding -----
 
 function renderPrep() {
+  if (!state.settings.analysedAt) {
+    return `<header class="page-head"><h1>Voorbereiding</h1></header>
+      <div class="empty">Start eerst de analyse (tabblad Analyse) en geef op hoeveel tins je hebt.</div>`;
+  }
   const a = getAnalysis(state.settings.activeMode);
   const kind = state.sub.prep === 'bundels' ? 'bundle' : 'tin';
   const units = a.units.filter((u) => u.kind === kind && u.count > 0);
@@ -1108,6 +1130,9 @@ function packEditor(p) {
         ${f('title', 'Titel zoekertje', 'text')}
         <label class="field"><span>Tekst zoekertje</span><textarea class="input" rows="10" data-pack="${esc(p.id)}" data-pf="text">${esc(p.text || '')}</textarea></label>
         <div class="btn-row">
+          <button class="btn small" data-action="pack-preview" data-pack="${esc(p.id)}">${icon('copy', 16)} Voorbeeld en kopiëren</button>
+        </div>
+        <div class="btn-row">
           <button class="btn small" data-action="pack-move" data-pack="${esc(p.id)}" data-dir="-1">Omhoog</button>
           <button class="btn small" data-action="pack-move" data-pack="${esc(p.id)}" data-dir="1">Omlaag</button>
           <button class="btn small" data-action="pack-reset-text" data-pack="${esc(p.id)}">Standaardtekst</button>
@@ -1142,7 +1167,7 @@ function renderSettings() {
     ${acc('listing', 'Zoekertjes', `#${esc(S.hashtag || '')}`, `
       <label class="field"><span>Eigen hashtag (zonder #)</span><input class="input" value="${esc(S.hashtag || '')}" data-text-setting="hashtag"></label>
       <label class="field"><span>Zoekwoorden onderaan</span><textarea class="input" rows="4" data-text-setting="keywords">${esc(S.keywords || '')}</textarea></label>
-      <p class="muted small">Invulvelden in de teksten van tins en bundels: {naam} {kaarten} {cu} (gewoon + energy) {holo} {energy} {extras} {set} {prijs} {hashtag} {hashtagsoort} {hashtagset} {zoekwoorden}. Een regel waarin een invulveld leeg of 0 is, valt weg.</p>`)}
+      <p class="muted small">Invulvelden in de teksten van tins en bundels: {naam} {kaarten} {cu} (gewoon + energy) {holo} {energy} {extras} {set} {prijs} {hashtag} {hashtagsoort} {hashtagset} {zoekwoorden}. De app vult ze automatisch in; je hoeft niets manueel te vervangen. Een regel waarin een invulveld leeg of 0 is, valt weg.</p>`)}
     ${acc('backup', 'Back-up', 'alles staat enkel op dit toestel', `
       <p class="muted small">Maak geregeld een back-up: zo raak je je voorraad, bundels en verkopen niet kwijt.</p>
       <div class="btn-row">
@@ -1306,6 +1331,22 @@ async function onClick(e) {
       [list[a1], list[a2]] = [list[a2], list[a1]];
       state.openPack = p.id;
       await save.settings(); render(); break;
+    }
+    case 'pack-preview': {
+      const pk = packById(el.dataset.pack);
+      const setId = pk.source === 'mix' ? '' : pk.source === 'perset' ? (state.settings.mySets[0] || '') : pk.source;
+      const l = listingFor({
+        packId: pk.id, type: pk.kind, name: pk.name, label: pk.name, ref: setId || 'mix', setName: setId ? setName(setId) : '',
+        size: (pk.cu || 0) + (pk.shiny || 0) + (pk.energy || 0), cu: pk.cu || 0, shiny: pk.shiny || 0, energy: pk.energy || 0, extras: pk.extras, price: pk.price || 0,
+      });
+      openSheet(`
+        <h2>Voorbeeld: ${esc(pk.name)}</h2>
+        <p class="muted small">Zo vult de app de invulvelden {…} automatisch in${pk.source === 'perset' ? ` (voorbeeld met ${esc(setName(setId))})` : ''}. Bij Te verkopen → Online krijg je de tekst van die ene tin/bundel.</p>
+        <label class="field"><span>Titel</span><input class="input" readonly value="${esc(l.title)}" id="lt-0"></label>
+        <button class="btn small" data-action="copy" data-src="lt-0">${icon('copy', 16)} Titel kopiëren</button>
+        <label class="field"><span>Beschrijving</span><textarea class="input" rows="12" readonly id="ld-0">${esc(l.text)}</textarea></label>
+        <button class="btn small" data-action="copy" data-src="ld-0">${icon('copy', 16)} Beschrijving kopiëren</button>`);
+      break;
     }
     case 'pack-reset-text': {
       const p = packById(el.dataset.pack);
