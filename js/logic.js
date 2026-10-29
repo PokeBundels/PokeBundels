@@ -45,13 +45,19 @@ const pack = (id, kind, name, cu, shiny, price, source, extra = {}) => ({
   ...extra,
 });
 
+// Startwaarden voor tins (oktober 2026). "accessoires" = wat bij de tin hoorde (sticker, artkaartje, coin…).
+const TIN_DEFAULTS = [
+  { id: 'mini', name: 'Mini tin', cu: 20, energy: 3, shiny: 2, price: 5, extras: 'accessoires van de tin' },
+  { id: 'pen', name: 'Pennenzak tin', cu: 40, energy: 5, shiny: 5, price: 10, extras: 'accessoires van de tin' },
+  { id: 'tin', name: 'Octagon tin', cu: 60, energy: 7, shiny: 8, price: 15, extras: 'accessoires van de tin' },
+  { id: 'stack', name: 'Stack tin', cu: 60, energy: 7, shiny: 8, price: 15, extras: 'accessoires van de tin' },
+  { id: 'map', name: 'Mapje', cu: 0, energy: 0, shiny: 0, price: 0, extras: '' },
+];
+
 /** Standaard verpakkingen. Tins krijgen altijd voorrang in de analyse, daarna bundels, in de volgorde van de lijst. */
 export function defaultPacks() {
   return [
-    pack('mini', 'tin', 'Mini tin', 23, 2, 4.95, 'mix'),
-    pack('tin', 'tin', 'Tin', 45, 5, 9.95, 'mix'),
-    pack('stack', 'tin', 'Stack tin', 45, 5, 9.95, 'mix'),
-    pack('pen', 'tin', 'Pennenzak tin', 45, 5, 9.95, 'mix'),
+    ...TIN_DEFAULTS.map((t) => pack(t.id, 'tin', t.name, t.cu, t.shiny, t.price, 'mix', { energy: t.energy, extras: t.extras })),
     pack('set', 'bundle', 'Setbundel', 45, 5, 6.5, 'perset'),
     pack('random', 'bundle', 'Random bundel', 45, 5, 5, 'mix'),
   ];
@@ -60,7 +66,7 @@ export function defaultPacks() {
 export const DEFAULT_SETTINGS = {
   packs: defaultPacks(),
   activeMode: 1,
-  bonusThreshold: 25,
+  packsVersion: 2,
   hashtag: 'pokebundelsbe',
   keywords: 'pokemon pokémon pokemonkaarten pokemoncards kaarten scarlet violet cadeau cadeautje cadeautip verjaardag verjaardagscadeau sinterklaas kerst verzamelen setje bundel tradingcards tcg',
   mySets: [],
@@ -82,7 +88,19 @@ export function migrateSettings(saved) {
     }
     out.packs = packs;
   }
-  for (const k of ['setBundle', 'randomBundle', 'tins', 'themeBundle', 'themes', 'themesFromPremium', 'premiumSets', 'premiumBundle', 'premiumRestToRandom']) delete out[k];
+  if ((saved?.packsVersion || 0) < 2) {
+    // nieuwe startwaarden voor de standaardtins; voorraad en bron blijven behouden
+    for (const t of TIN_DEFAULTS) {
+      const p = out.packs.find((x) => x.id === t.id);
+      if (p) Object.assign(p, { name: t.name, cu: t.cu, energy: t.energy, shiny: t.shiny, price: t.price, extras: t.extras });
+      else out.packs.splice(out.packs.filter((x) => x.kind === 'tin').length, 0, pack(t.id, 'tin', t.name, t.cu, t.shiny, t.price, 'mix', { energy: t.energy, extras: t.extras }));
+    }
+    const order = TIN_DEFAULTS.map((t) => t.id);
+    const tins = out.packs.filter((x) => x.kind === 'tin').sort((a, b) => (order.indexOf(a.id) + 1 || 99) - (order.indexOf(b.id) + 1 || 99));
+    out.packs = [...tins, ...out.packs.filter((x) => x.kind !== 'tin')];
+    out.packsVersion = 2;
+  }
+  for (const k of ['bonusThreshold', 'setBundle', 'randomBundle', 'tins', 'themeBundle', 'themes', 'themesFromPremium', 'premiumSets', 'premiumBundle', 'premiumRestToRandom']) delete out[k];
   return out;
 }
 
@@ -243,7 +261,7 @@ const sum = (arr) => arr.reduce((a, c) => a + c.count, 0);
 export function parseExtras(text) {
   return String(text || '').split(',').map((t) => t.trim()).filter(Boolean).map((t) => {
     const m = t.match(/^(\d+)\s*[x×]?\s*(.+)$/i);
-    return m ? { name: m[2].trim(), n: Number(m[1]) } : { name: t, n: 1 };
+    return m ? { name: m[2].trim(), n: Number(m[1]), label: `${m[1]} ${m[2].trim()}` } : { name: t, n: 1, label: t };
   });
 }
 

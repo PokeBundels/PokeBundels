@@ -6,7 +6,7 @@ import {
   MODES, TEMPLATES, analysePlan, defaultPacks, migrateSettings, parseExtras, isNonShiny, isNonHoloRare, isBundleCard, normNr, parseImport, pickVaried,
 } from './logic.js';
 
-const VERSION = '2.0.0';
+const VERSION = '2.1.0';
 const DAC7 = { sales: 30, revenue: 2000 };
 const PLATFORMS = ['Vinted', '2dehands', 'Anders'];
 
@@ -579,7 +579,7 @@ function compText(p) {
   const parts = [`${p.cu} gewoon`];
   if (p.shiny) parts.push(`${p.shiny} holo/reverse`);
   if (p.energy) parts.push(`${p.energy} energy`);
-  for (const x of parseExtras(p.extras)) parts.push(`${x.n} ${x.name}`);
+  for (const x of parseExtras(p.extras)) parts.push(x.label);
   return parts.join(' + ');
 }
 
@@ -734,7 +734,7 @@ function makeSheet(key) {
   const todo = [];
   if (unit.shiny) todo.push(`<b>${unit.shiny} holo/reverse</b> uit ${esc(from)}`);
   if (unit.energy) todo.push(`<b>${unit.energy} energy</b>`);
-  for (const x of parseExtras(unit.extras)) todo.push(`<b>${x.n} ${esc(x.name)}</b>`);
+  for (const x of parseExtras(unit.extras)) todo.push(`<b>${esc(x.label)}</b>`);
   const pack = unit.kind === 'tin' ? ` en steek alles in de <b>${esc(unit.name)}</b>` : '';
   openSheet(`
     <h2>${esc(unit.label)}</h2>
@@ -851,7 +851,7 @@ function listingFor(b) {
     cu: b.cu ?? (b.size - (b.shiny || 0)),
     holo: b.shiny || 0,
     energy: b.energy || 0,
-    extras: parseExtras(b.extras).map((x) => `${x.n} ${x.name}`).join(', '),
+    extras: parseExtras(b.extras).map((x) => x.label).join(', '),
     set: setLabel || 'verschillende Scarlet & Violet sets',
     prijs: eur(b.price),
     hashtag: tag ? `#${tag}` : '',
@@ -872,7 +872,6 @@ function stepSheet(id, step) {
   const label = STEPS.find(([s]) => s === step)[1];
   const done = targets.every((b) => b.steps?.[step]);
   const total = targets.reduce((s, b) => s + b.price, 0);
-  const thr = state.settings.bonusThreshold;
   const names = `<ul class="kv">${targets.map((b) => `<li><span>${esc(b.label)}</span><b>${eur(b.price)}</b></li>`).join('')}</ul>`;
   let body = '';
   if (step === 'online') {
@@ -888,19 +887,17 @@ function stepSheet(id, step) {
         </div>`;
     }).join('');
   } else if (step === 'geld') {
-    const bonus = targets.some((b) => b.steps?.verzonden?.bonus) || total >= thr;
     body = `${names}
       <label class="field"><span>Platform</span>
         <select class="input" id="sale-platform">${PLATFORMS.map((p) => `<option>${p}</option>`).join('')}</select></label>
       <label class="field"><span>Ontvangen bedrag (zonder verzending, na korting)</span>
         <input class="input" id="sale-price" type="number" inputmode="decimal" step="0.01" min="0" value="${total}"></label>
       <label class="field"><span>Datum</span><input class="input" id="step-date" type="date" value="${today()}"></label>
-      <label class="check"><input type="checkbox" id="sale-bonus" ${bonus ? 'checked' : ''}> Bonus (extra blinkende kaart) meegegeven</label>
       <p class="muted small">Na bevestigen gaat dit naar Verkocht.</p>`;
   } else {
     body = `${names}
       <label class="field"><span>Datum</span><input class="input" id="step-date" type="date" value="${today()}"></label>
-      ${step === 'verzonden' ? `<label class="check"><input type="checkbox" id="step-bonus" ${total >= thr ? 'checked' : ''}> Bonus vanaf ${eur(thr)}: 1 extra blinkende kaart per tin/bundel (${targets.length})</label>` : ''}`;
+`;
   }
   openSheet(`
     <h2>${label}</h2>
@@ -921,7 +918,6 @@ async function confirmStep(id, step) {
       platform: $('#sale-platform').value,
       price: Number($('#sale-price').value) || 0,
       date: at,
-      bonus: $('#sale-bonus').checked,
       bundleIds: targets.map((b) => b.id),
       labels: targets.map((b) => b.label),
     };
@@ -931,11 +927,9 @@ async function confirmStep(id, step) {
     closeSheet(); toast('Verkocht! Staat nu bij Verkocht.'); render();
     return;
   }
-  const extra = step === 'verzonden' ? { bonus: !!$('#step-bonus')?.checked } : {};
-  for (const b of targets) b.steps = { ...(b.steps || {}), [step]: { at, ...extra } };
+  for (const b of targets) b.steps = { ...(b.steps || {}), [step]: { at } };
   await save.bundles();
   closeSheet();
-  if (extra.bonus) toast(`Vergeet de ${targets.length} extra blinkende kaart(en) niet.`);
   render();
 }
 
@@ -1049,9 +1043,6 @@ function renderSettings() {
       <label class="field"><span>Eigen hashtag (zonder #)</span><input class="input" value="${esc(S.hashtag || '')}" data-text-setting="hashtag"></label>
       <label class="field"><span>Zoekwoorden onderaan</span><textarea class="input" rows="4" data-text-setting="keywords">${esc(S.keywords || '')}</textarea></label>
       <p class="muted small">Invulvelden in de teksten van tins en bundels: {naam} {kaarten} {cu} {holo} {energy} {extras} {set} {prijs} {hashtag} {hashtagsoort} {hashtagset} {zoekwoorden}. Een regel waarin een invulveld leeg of 0 is, valt weg.</p>`)}
-    ${acc('bonus', 'Bonus', `extra blinkende kaart vanaf ${eur(S.bonusThreshold)}`, `
-      <label class="field"><span>Extra blinkende kaart per bundel vanaf (€)</span>
-      <input class="input" type="number" min="0" data-setting="bonusThreshold" value="${S.bonusThreshold}"></label>`)}
     ${acc('backup', 'Back-up', 'alles staat enkel op dit toestel', `
       <p class="muted small">Maak geregeld een back-up: zo raak je je voorraad, bundels en verkopen niet kwijt.</p>
       <div class="btn-row">
