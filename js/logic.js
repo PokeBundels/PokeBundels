@@ -6,6 +6,7 @@ export const DEFAULT_SETTINGS = {
   activeMode: 1,
   bonusThreshold: 25,
   mySets: [],
+  tins: [], // [{id, name, stock, size, shiny, price}] — verpakkingen met eigen bundelgrootte en prijs
   rareOk: [], // kaarten zonder common/uncommon die je bewust aan je voorraad toevoegde
 };
 

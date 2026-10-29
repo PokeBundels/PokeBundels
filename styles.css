@@ -273,3 +273,10 @@ details.acc > summary:focus-visible { outline: 2px solid var(--accent); outline-
 .rare-ask img { width: 90px; border-radius: 6px; flex: none; }
 .rare-box { margin-top: 12px; padding: 12px; border: 1px solid var(--accent); border-radius: var(--radius); }
 .rare-box .check { display: flex; gap: 8px; align-items: center; margin: 6px 0; }
+
+/* Tins */
+.tin-opt .tin-src { margin-top: 6px; min-height: 38px; padding: 6px 10px; }
+.tin-edit { padding: 12px 0; border-bottom: 1px solid var(--line); }
+.tin-edit .four { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.tin-edit .field span { white-space: nowrap; }
+.tin-edit .four .field { margin: 0; }

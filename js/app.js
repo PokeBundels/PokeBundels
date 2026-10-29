@@ -3,10 +3,10 @@
 import { db, persist } from './db.js';
 import { listSets, getSet, imageUrl, fillReleaseDates } from './tcgdex.js';
 import {
-  DEFAULT_SETTINGS, MODES, analyse, isNonShiny, isNonHoloRare, isBundleCard, normNr, parseImport, pickVaried,
+  DEFAULT_SETTINGS, MODES, analyse, isNonShiny, isNonHoloRare, isBundleCard, maxBundles, normNr, parseImport, pickVaried,
 } from './logic.js';
 
-const VERSION = '1.4.1';
+const VERSION = '1.5.0';
 const DAC7 = { sales: 30, revenue: 2000 };
 const PLATFORMS = ['Vinted', '2dehands', 'Anders'];
 
@@ -30,6 +30,7 @@ const state = {
   mode: 1,
   pick: new Set(),    // geselecteerde bundels om te verkopen
   openAcc: null,      // open groep in Instellingen
+  tinSource: {},      // gekozen bron per tin in Bundels
   openEras: loadOpenEras(), // opengeklapte era's in Inventaris
   invVersion: 0,
   analysisCache: {},
@@ -644,14 +645,72 @@ function bundleOptions(a) {
 // Pakbon met variatie: willekeurige kaarten, en zo weinig mogelijk overlap met
 // nog niet verkochte bundels van hetzelfde soort (koper die er meerdere neemt).
 function variedBundle(a, type, ref) {
-  const part = type === 'random' ? a.random : a.sets[ref];
-  if (!part?.bundles.length) return null;
-  const n = part.size - part.shiny;
   const avoid = new Set();
   for (const b of state.bundles) {
     if (b.status === 'gemaakt' && b.type === type && b.ref === ref) for (const x of b.cards) avoid.add(x.id);
   }
+  if (type === 'tin') {
+    const t = tinSpec(a, ref);
+    if (!t || !t.possible || t.tin.stock < 1) return null;
+    return pickVaried(t.pool, t.n, a.k, t.possible, avoid);
+  }
+  const part = type === 'random' ? a.random : a.sets[ref];
+  if (!part?.bundles.length) return null;
+  const n = part.size - part.shiny;
   return pickVaried(part.pool, n, a.k, part.bundles.length, avoid) || part.bundles[0];
+}
+
+// ----- Tins: een verpakking met eigen aantal kaarten en prijs, gevuld uit random of uit één set -----
+
+function tinRef(tinId, source) { return `${tinId}|${source}`; }
+
+function tinSources(a) {
+  const out = [];
+  if (a.random.pool?.length) out.push({ id: 'random', name: 'Random (overschot)', pool: a.random.pool });
+  for (const s of Object.values(a.sets).sort((x, y) => x.name.localeCompare(y.name))) out.push({ id: s.setId, name: s.name, pool: s.pool });
+  return out;
+}
+
+function tinSpec(a, ref) {
+  const [tinId, source] = String(ref).split('|');
+  const tin = state.settings.tins.find((t) => t.id === tinId);
+  if (!tin) return null;
+  const src = tinSources(a).find((s) => s.id === source);
+  if (!src) return null;
+  const n = Math.max(0, tin.size - tin.shiny);
+  const possible = maxBundles(src.pool.map((c) => c.count), n, a.k);
+  return {
+    tin, source, pool: src.pool, n, possible,
+    type: 'tin', ref, label: `${tin.name} · ${src.name}`, price: tin.price, shiny: tin.shiny, size: tin.size,
+  };
+}
+
+function specFor(a, type, ref) {
+  if (type === 'tin') return tinSpec(a, ref);
+  return bundleOptions(a).find((o) => o.type === type && o.ref === ref);
+}
+
+function tinsHtml(a) {
+  const tins = state.settings.tins;
+  if (!tins.length) return '<p class="muted small">Nog geen tins. Voeg ze toe in Instellingen → Tins.</p>';
+  const sources = tinSources(a);
+  return tins.map((t) => {
+    const n = Math.max(0, t.size - t.shiny);
+    const opts = sources.map((s) => {
+      const p = maxBundles(s.pool.map((c) => c.count), n, a.k);
+      return `<option value="${esc(s.id)}" ${p ? '' : 'disabled'}>${esc(s.name)} (${p}×)</option>`;
+    }).join('');
+    const sel = state.tinSource[t.id];
+    return `
+      <div class="opt tin-opt">
+        <div class="opt-main"><div class="opt-name">${esc(t.name)}</div>
+          <div class="muted small">${t.size} kaarten (${t.shiny} holo/reverse) · ${t.stock} op voorraad</div>
+          <select class="input tin-src" data-tin-src="${esc(t.id)}" aria-label="Kaarten uit">${opts.replace(`value="${esc(sel || '')}"`, `value="${esc(sel || '')}" selected`)}</select>
+        </div>
+        <div class="opt-side"><span class="opt-n">${t.stock}×</span><span class="small">${eur(t.price)}</span></div>
+        <button class="btn primary small" data-action="make-tin" data-tin="${esc(t.id)}" ${t.stock > 0 ? '' : 'disabled'}>Maak</button>
+      </div>`;
+  }).join('');
 }
 
 function renderBundles() {
@@ -693,6 +752,11 @@ function renderBundles() {
       ${optHtml || '<p class="muted">Geen bundels mogelijk met je huidige voorraad.</p>'}
     </section>
     <section class="card">
+      <h2>Tins</h2>
+      <p class="muted small">Kies waar de kaarten vandaan komen. Tussen haakjes: hoeveel tins je daaruit kunt vullen.</p>
+      ${tinsHtml(a)}
+    </section>
+    <section class="card">
       <h2>Klaar voor verkoop <span class="muted small">(${open.length})</span></h2>
       ${openHtml || '<p class="muted">Nog geen gemaakte bundels.</p>'}
       ${open.length ? `<div class="btn-row sticky-actions"><button class="btn primary" data-action="sell" ${sel.length ? '' : 'disabled'}>Verkoop selectie (${sel.length}) · ${eur(selTotal)}</button></div>` : ''}
@@ -705,7 +769,7 @@ function makeSheet(type, ref) {
   if (!b) { toast('Deze bundel is niet meer mogelijk.'); render(); return; }
   state.pending = { type, ref, cards: b };
   const idx = cardIndex();
-  const opt = bundleOptions(a).find((o) => o.type === type && o.ref === ref);
+  const opt = specFor(a, type, ref);
   const lines = b.map((x) => ({ ...idx.get(x.id), count: x.count }))
     .sort((p, q) => (p.setName || '').localeCompare(q.setName || '') || String(p.localId).localeCompare(String(q.localId), undefined, { numeric: true }));
   let lastSet = null;
@@ -720,7 +784,10 @@ function makeSheet(type, ref) {
     </label></li>`;
   }).join('');
   let shinyText = '';
+  const tinSet = type === 'tin' && opt.source !== 'random' ? opt.source : null;
   if (type === 'set') shinyText = `Neem <b>${opt.shiny} holo/reverse uit ${esc(opt.label)}</b> uit je map.`;
+  else if (tinSet) shinyText = `Neem <b>${opt.shiny} holo/reverse uit ${esc(setName(tinSet))}</b> uit je map en steek alles in de <b>${esc(opt.tin.name)}</b>.`;
+  else if (type === 'tin') shinyText = `Neem <b>${opt.shiny} holo/reverse uit gewone sets</b> en steek alles in de <b>${esc(opt.tin.name)}</b>.`;
   else {
     const sets = Object.keys(a.random.shinyBySet).map((s) => state.sets[s]?.name || s).join(', ');
     shinyText = `Neem <b>${opt.shiny} holo/reverse uit gewone sets</b>${sets ? ` (bv. ${esc(sets)})` : ''}.`;
@@ -744,8 +811,9 @@ async function confirmMake(type, ref) {
   const p = state.pending;
   const b = p && p.type === type && p.ref === ref ? p.cards : null;
   state.pending = null;
-  const opt = bundleOptions(a).find((o) => o.type === type && o.ref === ref);
-  if (!b || !opt || b.some((x) => (state.inventory[x.id] || 0) < x.count)) { closeSheet(); toast('Deze bundel is niet meer mogelijk.'); render(); return; }
+  const opt = specFor(a, type, ref);
+  if (!b || !opt || b.some((x) => (state.inventory[x.id] || 0) < x.count) || (type === 'tin' && opt.tin.stock < 1)) { closeSheet(); toast('Deze bundel is niet meer mogelijk.'); render(); return; }
+  if (type === 'tin') { opt.tin.stock -= 1; await save.settings(); }
   for (const x of b) {
     const n = (state.inventory[x.id] || 0) - x.count;
     if (n > 0) state.inventory[x.id] = n; else delete state.inventory[x.id];
@@ -753,6 +821,7 @@ async function confirmMake(type, ref) {
   state.bundles.unshift({
     id: uid(), type, ref, label: opt.label, price: opt.price, size: b.reduce((s, x) => s + x.count, 0) + opt.shiny,
     shiny: opt.shiny, cards: b, status: 'gemaakt', createdAt: today(), mode: state.settings.activeMode,
+    ...(type === 'tin' ? { tinId: opt.tin.id } : {}),
   });
   await save.inventory();
   await save.bundles();
@@ -765,6 +834,8 @@ async function unmake(id) {
   const b = state.bundles.find((x) => x.id === id);
   if (!b || !confirm(`"${b.label}" uit elkaar halen en de kaarten terug in voorraad zetten?`)) return;
   for (const x of b.cards) state.inventory[x.id] = (state.inventory[x.id] || 0) + x.count;
+  const tin = b.tinId && state.settings.tins.find((t) => t.id === b.tinId);
+  if (tin) { tin.stock += 1; await save.settings(); }
   state.bundles = state.bundles.filter((x) => x.id !== id);
   state.pick.delete(id);
   await save.inventory();
@@ -885,6 +956,20 @@ function renderSettings() {
     <div class="accs">
     ${acc('bundles', 'Bundels', `per set ${eur(S.setBundle.price)} · random ${eur(S.randomBundle.price)}`,
       bundleField('setBundle', 'Bundel per set') + bundleField('randomBundle', 'Random pick'))}
+    ${acc('tins', 'Tins', S.tins.length ? `${S.tins.reduce((s, t) => s + t.stock, 0)} op voorraad` : 'geen', `
+      <p class="muted small">Een tin is een verpakking met een eigen aantal kaarten en prijs. Bij "Maak" gaat de voorraad met 1 omlaag.</p>
+      ${S.tins.map((t) => `
+        <div class="tin-edit">
+          <label class="field"><span>Naam</span><input class="input" value="${esc(t.name)}" data-tin="${esc(t.id)}" data-tin-field="name"></label>
+          <div class="four">
+            <label class="field"><span>Voorraad</span><input class="input" type="number" min="0" value="${t.stock}" data-tin="${esc(t.id)}" data-tin-field="stock"></label>
+            <label class="field"><span>Kaarten</span><input class="input" type="number" min="1" value="${t.size}" data-tin="${esc(t.id)}" data-tin-field="size"></label>
+            <label class="field"><span>Holo/rev.</span><input class="input" type="number" min="0" value="${t.shiny}" data-tin="${esc(t.id)}" data-tin-field="shiny"></label>
+            <label class="field"><span>Prijs (€)</span><input class="input" type="number" min="0" step="0.05" value="${t.price}" data-tin="${esc(t.id)}" data-tin-field="price"></label>
+          </div>
+          <button class="btn ghost small danger" data-action="remove-tin" data-tin="${esc(t.id)}">Verwijderen</button>
+        </div>`).join('')}
+      <div class="btn-row"><button class="btn small" data-action="add-tin">${icon('plus', 16)} Tin toevoegen</button></div>`)}
     ${acc('bonus', 'Bonus', `extra blinkende kaart vanaf ${eur(S.bonusThreshold)}`, `
       <label class="field"><span>Extra blinkende kaart per bundel vanaf (€)</span>
       <input class="input" type="number" min="0" data-setting="bonusThreshold" value="${S.bonusThreshold}"></label>`)}
@@ -1003,6 +1088,22 @@ async function onClick(e) {
     case 'reanalyse': state.analysisCache = {}; render(); toast('Opnieuw berekend.'); break;
     case 'use-plan': state.settings.activeMode = Number(el.dataset.k); await save.settings(); state.view = 'bun'; render(); toast('Plan actief.'); break;
     case 'make': makeSheet(el.dataset.type, el.dataset.ref); break;
+    case 'make-tin': {
+      const src = document.querySelector(`[data-tin-src="${CSS.escape(el.dataset.tin)}"]`)?.value;
+      if (!src) { toast('Geen kaarten om deze tin te vullen.'); break; }
+      makeSheet('tin', tinRef(el.dataset.tin, src));
+      break;
+    }
+    case 'add-tin':
+      state.settings.tins.push({ id: uid(), name: 'Mini tin', stock: 0, size: 25, shiny: 2, price: 4.95 });
+      state.openAcc = 'tins';
+      await save.settings(); render(); break;
+    case 'remove-tin': {
+      const t = state.settings.tins.find((x) => x.id === el.dataset.tin);
+      if (!t || !confirm(`"${t.name}" verwijderen? Gemaakte tin-bundels blijven bestaan.`)) break;
+      state.settings.tins = state.settings.tins.filter((x) => x !== t);
+      await save.settings(); render(); break;
+    }
     case 'confirm-make': await confirmMake(el.dataset.type, el.dataset.ref); break;
     case 'unmake': e.preventDefault(); await unmake(el.dataset.id); break;
     case 'pick': {
@@ -1042,6 +1143,21 @@ async function onChange(e) {
   const el = e.target;
   if (el.dataset.input === 'count') requestCount(el.dataset.card, Number(el.value));
   if (el.dataset.input === 'restore' && el.files?.[0]) await restoreBackup(el.files[0]);
+  if (el.dataset.tinSrc) state.tinSource[el.dataset.tinSrc] = el.value;
+  if (el.dataset.tinField) {
+    const t = state.settings.tins.find((x) => x.id === el.dataset.tin);
+    if (!t) return;
+    const f = el.dataset.tinField;
+    if (f === 'name') t.name = el.value.trim() || 'Tin';
+    else {
+      const v = Number(el.value);
+      if (!Number.isFinite(v) || v < 0) return;
+      t[f] = f === 'price' ? v : Math.round(v);
+      if (t.shiny >= t.size) { toast('Aantal holo/reverse moet kleiner zijn dan het aantal kaarten.'); return; }
+    }
+    state.analysisCache = {};
+    await save.settings();
+  }
   if (el.dataset.setting) {
     const path = el.dataset.setting.split('.');
     const v = Number(el.value);
