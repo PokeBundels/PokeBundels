@@ -227,8 +227,6 @@ legend { padding: 0 6px; font-weight: 700; font-family: 'Bricolage Grotesque', s
 .set-pick-name { font-weight: 700; }
 .set-pick-head { flex: none; font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); font-weight: 700; padding: 12px 2px 2px; }
 .set-pick-list > .btn { align-self: flex-start; }
-.prem-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); }
-.prem-name { font-weight: 700; }
 details { margin: 10px 0; }
 summary { cursor: pointer; color: var(--muted); min-height: 32px; }
 

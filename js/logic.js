@@ -1,11 +1,8 @@
 // PokeBundels — pure rekenlogica (geen DOM, testbaar in Node)
 
 export const DEFAULT_SETTINGS = {
-  premiumSets: ['sv03.5', 'sv08.5', 'sv10'],
   setBundle: { size: 50, shiny: 5, price: 5 },
-  premiumBundle: { size: 50, shiny: 5, price: 7.5 },
   randomBundle: { size: 50, shiny: 5, price: 4.5 },
-  premiumRestToRandom: false,
   activeMode: 1,
   bonusThreshold: 25,
   mySets: [],
@@ -142,7 +139,6 @@ const sum = (arr) => arr.reduce((a, c) => a + c.count, 0);
  * setNames: {setId: naam}
  */
 export function analyse(cards, settings, k, setNames = {}) {
-  const premium = new Set(settings.premiumSets || []);
   const eligible = cards.filter((c) => c.count > 0 && isNonShiny(c));
   const byId = new Map(eligible.map((c) => [c.id, c]));
   const order = (a, b) => {
@@ -156,28 +152,19 @@ export function analyse(cards, settings, k, setNames = {}) {
   for (const c of eligible) (setPools[c.setId] ||= []).push({ id: c.id, count: c.count });
 
   const randomPool = [];
-  const premiumRest = [];
-  const pushRest = (list) => {
-    for (const x of list) {
-      const card = byId.get(x.id);
-      if (premium.has(card.setId) && !settings.premiumRestToRandom) premiumRest.push(x);
-      else randomPool.push(x);
-    }
-  };
 
   // 1. Sets
   const setRes = {};
   for (const [setId, pool] of Object.entries(setPools)) {
-    const isPrem = premium.has(setId);
-    const cfg = isPrem ? settings.premiumBundle : settings.setBundle;
+    const cfg = settings.setBundle;
     const n = cfg.size - cfg.shiny;
     const { bundles, leftover } = allocate(pool, n, k, order);
     setRes[setId] = {
-      setId, name: setNames[setId] || setId, premium: isPrem, bundles, pool,
+      setId, name: setNames[setId] || setId, bundles, pool,
       unique: pool.length, total: sum(pool), rest: sum(leftover),
       price: cfg.price, shiny: cfg.shiny, size: cfg.size,
     };
-    pushRest(leftover);
+    randomPool.push(...leftover);
   }
 
   // 2. Random (overschot uit gewone sets)
@@ -213,7 +200,6 @@ export function analyse(cards, settings, k, setNames = {}) {
 
   return {
     k, sets: setRes, random: randomRes,
-    premiumRest: sum(premiumRest),
     summary: {
       bundleCount, revenue, shinyNeed, randomShiny,
       shinyTotal: Object.values(shinyNeed).reduce((a, c) => a + c, 0) + randomShiny,
