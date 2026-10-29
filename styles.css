@@ -304,3 +304,10 @@ details.pack > summary::-webkit-details-marker { display: none; }
 
 /* zes tabbladen onderaan */
 .nav-btn span { font-size: 10.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+
+/* Specifieke Pokémon */
+details.must { margin: 10px 0; padding: 8px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-2); }
+details.must > summary { cursor: pointer; font-weight: 700; min-height: 32px; display: flex; align-items: center; }
+.must-row { display: grid; grid-template-columns: minmax(0, 1fr) 72px auto; gap: 8px; align-items: center; margin-top: 8px; }
+.must-info { margin: 2px 0 4px; }
+.warnbox { border-color: #e0a100; flex-direction: column; gap: 4px; }
