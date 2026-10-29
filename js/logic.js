@@ -6,7 +6,7 @@ export const DEFAULT_SETTINGS = {
   activeMode: 1,
   bonusThreshold: 25,
   mySets: [],
-  rareOk: [], // niet-holo rares uit oudere sets die je bewust aan je voorraad toevoegde
+  rareOk: [], // kaarten zonder common/uncommon die je bewust aan je voorraad toevoegde
 };
 
 export const MODES = [
@@ -38,9 +38,9 @@ export function isNonHoloRare(card) {
   return (card.rarity || '').toLowerCase() === 'rare' && isOldSet(setIdOf(card));
 }
 
-/** Komt in bundels: common/uncommon, of een niet-holo rare die je bevestigd hebt. */
+/** Komt in bundels: common/uncommon, of een andere kaart die je bij het toevoegen bevestigd hebt. */
 export function isBundleCard(card, rareOk = []) {
-  return isNonShiny(card) || (rareOk.includes(card.id) && isNonHoloRare(card));
+  return isNonShiny(card) || rareOk.includes(card.id);
 }
 
 /**

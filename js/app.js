@@ -6,7 +6,7 @@ import {
   DEFAULT_SETTINGS, MODES, analyse, isNonShiny, isNonHoloRare, isBundleCard, normNr, parseImport, pickVaried,
 } from './logic.js';
 
-const VERSION = '1.4.0';
+const VERSION = '1.4.1';
 const DAC7 = { sales: 30, revenue: 2000 };
 const PLATFORMS = ['Vinted', '2dehands', 'Anders'];
 
@@ -351,22 +351,24 @@ function releaseKey(s) {
 }
 
 function inBundles(c) { return isBundleCard(c, state.settings.rareOk); }
-function needsRareOk(c) { return isNonHoloRare(c) && !state.settings.rareOk.includes(c.id); }
+function needsRareOk(c) { return !isNonShiny(c) && !state.settings.rareOk.includes(c.id); }
+function rarityLabel(c) { return c.rarity || 'onbekende zeldzaamheid'; }
 
-// Niet-holo rare uit een oudere set: eerst vragen of hij erbij moet.
+// Elke kaart die geen common/uncommon is: eerst vragen of hij erbij moet.
 function requestCount(cardId, n) {
   const card = cardIndex().get(cardId);
   const cur = state.inventory[cardId] || 0;
   if (!card || n <= cur || !needsRareOk(card)) { setCount(cardId, n); return; }
   const img = imageUrl(card);
   openSheet(`
-    <h2>Niet-holo rare</h2>
+    <h2>Geen common/uncommon</h2>
     <div class="rare-ask">
       ${img ? `<img src="${esc(img)}" alt="">` : ''}
-      <div><b>#${esc(card.localId)} ${esc(card.name)}</b><div class="muted small">${esc(card.setName || '')}</div></div>
+      <div><b>#${esc(card.localId)} ${esc(card.name)}</b><div class="muted small">${esc(card.setName || '')}</div>
+        <span class="badge gold">${esc(rarityLabel(card))}</span></div>
     </div>
-    <p>In oudere sets bestaan rares die niet blinken. Deze kaart is een <b>rare</b>, geen common of uncommon.</p>
-    <p>Wil je hem toevoegen aan je voorraad? Dan kan hij ook in bundels terechtkomen.</p>
+    <p>Volgens TCGdex is deze kaart <b>${esc(rarityLabel(card))}</b>, geen common of uncommon.${isNonHoloRare(card) ? ' In oudere sets bestaan rares die niet blinken.' : ''}</p>
+    <p>Toch toevoegen aan je voorraad? Dan telt hij mee als gewone bundelkaart.</p>
     <div class="btn-row sticky-actions">
       <button class="btn" data-action="rare-no" data-card="${esc(cardId)}">Niet toevoegen</button>
       <button class="btn primary" data-action="rare-yes" data-card="${esc(cardId)}" data-n="${n}">${icon('check', 18)} Toevoegen</button>
@@ -543,7 +545,7 @@ async function doImport() {
       const cur = state.inventory[card.id] || 0;
       const n = mode === 'set' ? r.count : cur + r.count;
       if (n > cur && needsRareOk({ ...card, setId: set.id })) {
-        pendingRares.push({ id: card.id, n, add: n - cur, label: `#${card.localId} ${card.name}`, setName: set.name });
+        pendingRares.push({ id: card.id, n, add: n - cur, label: `#${card.localId} ${card.name}`, rarity: rarityLabel(card), setName: set.name, checked: isNonHoloRare({ ...card, setId: set.id }) });
         continue;
       }
       if (n > 0) state.inventory[card.id] = n; else delete state.inventory[card.id];
@@ -556,8 +558,8 @@ async function doImport() {
     (unmatched.length ? `<p class="error small">Niet (zeker) gevonden:</p><ul class="small">${unmatched.map((u) => `<li>${esc(u)}</li>`).join('')}</ul>` : '') +
     (pendingRares.length ? `
       <div class="rare-box" id="rare-box">
-        <p><b>${pendingRares.length} niet-holo rare${pendingRares.length > 1 ? 's' : ''}</b> uit oudere sets. Die zijn nog <b>niet</b> toegevoegd. Vink aan welke erbij mogen:</p>
-        ${pendingRares.map((p) => `<label class="check"><input type="checkbox" checked data-rare="${esc(p.id)}" data-n="${p.n}"> ${esc(p.label)} <span class="muted small">+${p.add} · ${esc(p.setName)}</span></label>`).join('')}
+        <p><b>${pendingRares.length} kaart${pendingRares.length > 1 ? 'en' : ''}</b> zonder common/uncommon. Die zijn nog <b>niet</b> toegevoegd. Vink aan welke toch als gewone bundelkaart mogen:</p>
+        ${pendingRares.map((p) => `<label class="check"><input type="checkbox" ${p.checked ? 'checked' : ''} data-rare="${esc(p.id)}" data-n="${p.n}"> <span>${esc(p.label)} <span class="badge">${esc(p.rarity)}</span><br><span class="muted small">+${p.add} · ${esc(p.setName)}</span></span></label>`).join('')}
         <div class="btn-row">
           <button class="btn small" data-action="rare-import-skip">Niet toevoegen</button>
           <button class="btn primary small" data-action="rare-import">${icon('check', 16)} Aangevinkte toevoegen</button>
@@ -961,7 +963,7 @@ async function onClick(e) {
     case 'dec': setCount(el.dataset.card, (state.inventory[el.dataset.card] || 0) - 1); break;
     case 'import': importSheet(); break;
     case 'do-import': await doImport(); break;
-    case 'rare-yes': await approveRare(el.dataset.card); closeSheet(); setCount(el.dataset.card, Number(el.dataset.n)); toast('Rare toegevoegd.'); break;
+    case 'rare-yes': await approveRare(el.dataset.card); closeSheet(); setCount(el.dataset.card, Number(el.dataset.n)); toast('Kaart toegevoegd.'); break;
     case 'rare-no': closeSheet(); setCount(el.dataset.card, state.inventory[el.dataset.card] || 0); break;
     case 'rare-import': {
       let n = 0;
