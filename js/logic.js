@@ -6,6 +6,7 @@ export const DEFAULT_SETTINGS = {
   activeMode: 1,
   bonusThreshold: 25,
   mySets: [],
+  rareOk: [], // niet-holo rares uit oudere sets die je bewust aan je voorraad toevoegde
 };
 
 export const MODES = [
@@ -18,6 +19,28 @@ export const MODES = [
 export function isNonShiny(card) {
   const r = (card.rarity || '').toLowerCase();
   return r === 'common' || r === 'uncommon';
+}
+
+/** Set-ID uit een kaart halen ("swsh1-12" -> "swsh1"). */
+export function setIdOf(card) {
+  if (card.setId) return card.setId;
+  const id = String(card.id || '');
+  return id.slice(0, id.lastIndexOf('-'));
+}
+
+/** Sets van vóór Scarlet & Violet. Daar bestaan niet-holo rares; vanaf SV is elke rare holo. */
+export function isOldSet(setId) {
+  return !/^(sv|me)/i.test(String(setId || ''));
+}
+
+/** Niet-holo rare: rarity precies "Rare" in een oudere set. */
+export function isNonHoloRare(card) {
+  return (card.rarity || '').toLowerCase() === 'rare' && isOldSet(setIdOf(card));
+}
+
+/** Komt in bundels: common/uncommon, of een niet-holo rare die je bevestigd hebt. */
+export function isBundleCard(card, rareOk = []) {
+  return isNonShiny(card) || (rareOk.includes(card.id) && isNonHoloRare(card));
 }
 
 /**
@@ -139,7 +162,7 @@ const sum = (arr) => arr.reduce((a, c) => a + c.count, 0);
  * setNames: {setId: naam}
  */
 export function analyse(cards, settings, k, setNames = {}) {
-  const eligible = cards.filter((c) => c.count > 0 && isNonShiny(c));
+  const eligible = cards.filter((c) => c.count > 0 && isBundleCard(c, settings.rareOk || []));
   const byId = new Map(eligible.map((c) => [c.id, c]));
   const order = (a, b) => {
     const A = byId.get(a), Bc = byId.get(b);

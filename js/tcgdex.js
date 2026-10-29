@@ -3,7 +3,8 @@
 import { db } from './db.js';
 
 const API = 'https://api.tcgdex.net/v2/en';
-const SERIES = ['sv', 'me'];
+// Oud naar nieuw; de lijst wordt achteraf omgedraaid (nieuwste eerst).
+const SERIES = ['xy', 'sm', 'swsh', 'sv', 'me'];
 
 async function getJson(url) {
   const res = await fetch(url);
@@ -11,9 +12,9 @@ async function getJson(url) {
   return res.json();
 }
 
-/** Lijst van beschikbare sets (Scarlet & Violet + Mega Evolution), nieuwste eerst. */
+/** Lijst van beschikbare sets (XY tot Mega Evolution), nieuwste eerst. */
 export async function listSets(force = false) {
-  const cached = await db.get('setlist');
+  const cached = await db.get('setlist2');
   if (cached && !force && Date.now() - cached.at < 7 * 864e5) return cached.sets;
   const all = [];
   for (const s of SERIES) {
@@ -23,11 +24,11 @@ export async function listSets(force = false) {
         all.push({ id: set.id, name: set.name, serie: serie.name, cardCount: set.cardCount?.official ?? set.cardCount?.total ?? null });
       }
     } catch (e) {
-      if (s === 'sv') throw e; // ME bestaat misschien (nog) niet in TCGdex
+      if (s === 'sv') throw e; // andere series zijn optioneel
     }
   }
   all.reverse();
-  await db.set('setlist', { at: Date.now(), sets: all });
+  await db.set('setlist2', { at: Date.now(), sets: all });
   return all;
 }
 
@@ -75,11 +76,27 @@ export async function getSet(setId, { force = false, onProgress } = {}) {
   await Promise.all(Array.from({ length: 6 }, worker));
 
   const result = {
-    id: set.id, name: set.name, serie: set.serie?.name || '',
+    id: set.id, name: set.name, serie: set.serie?.name || '', releaseDate: set.releaseDate || '',
     cards, complete: failed === 0, fetchedAt: Date.now(),
   };
   await db.set(key, result);
   return result;
+}
+
+/** Releasedatum aanvullen voor sets die bewaard werden vóór die bijgehouden werd. Geeft true als er iets veranderde. */
+export async function fillReleaseDates(sets) {
+  let changed = false;
+  for (const s of sets) {
+    if (s.releaseDate) continue;
+    try {
+      const info = await getJson(`${API}/sets/${encodeURIComponent(s.id)}`);
+      s.releaseDate = info.releaseDate || '';
+      if (!s.serie) s.serie = info.serie?.name || '';
+      await db.set(`set:${s.id}`, s);
+      changed = true;
+    } catch { /* later opnieuw */ }
+  }
+  return changed;
 }
 
 export function imageUrl(card, quality = 'low') {

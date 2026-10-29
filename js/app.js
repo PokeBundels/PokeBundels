@@ -1,14 +1,21 @@
 // PokeBundels — app
 
 import { db, persist } from './db.js';
-import { listSets, getSet, imageUrl } from './tcgdex.js';
+import { listSets, getSet, imageUrl, fillReleaseDates } from './tcgdex.js';
 import {
-  DEFAULT_SETTINGS, MODES, analyse, isNonShiny, normNr, parseImport, pickVaried,
+  DEFAULT_SETTINGS, MODES, analyse, isNonShiny, isNonHoloRare, isBundleCard, normNr, parseImport, pickVaried,
 } from './logic.js';
 
-const VERSION = '1.3.0';
+const VERSION = '1.4.0';
 const DAC7 = { sales: 30, revenue: 2000 };
 const PLATFORMS = ['Vinted', '2dehands', 'Anders'];
+
+function loadOpenEras() {
+  try { return new Set(JSON.parse(localStorage.getItem('pb-open-eras') || '[]')); } catch { return new Set(); }
+}
+function saveOpenEras() {
+  try { localStorage.setItem('pb-open-eras', JSON.stringify([...state.openEras])); } catch { /* geen opslag */ }
+}
 
 const state = {
   settings: structuredClone(DEFAULT_SETTINGS),
@@ -23,6 +30,7 @@ const state = {
   mode: 1,
   pick: new Set(),    // geselecteerde bundels om te verkopen
   openAcc: null,      // open groep in Instellingen
+  openEras: loadOpenEras(), // opengeklapte era's in Inventaris
   invVersion: 0,
   analysisCache: {},
 };
@@ -49,7 +57,7 @@ async function load() {
   state.bundles = bundles || [];
   state.sales = sales || [];
   state.mode = state.settings.activeMode || 1;
-  state.setList = (await db.get('setlist'))?.sets || [];
+  state.setList = (await db.get('setlist2'))?.sets || [];
   for (const id of state.settings.mySets) {
     const s = await db.get(`set:${id}`);
     if (s) state.sets[id] = s;
@@ -217,21 +225,43 @@ function renderInventory() {
   if (state.invSet && state.sets[state.invSet]) return renderSetDetail(state.invSet);
   const sets = state.settings.mySets.map((id) => state.sets[id]).filter(Boolean);
   let total = 0, unique = 0;
-  const rows = sets.map((s) => {
+  const stats = new Map();
+  for (const s of sets) {
     let t = 0, u = 0;
     for (const c of s.cards) {
       const n = state.inventory[c.id] || 0;
-      if (n > 0 && isNonShiny(c)) { t += n; u++; }
+      if (n > 0 && inBundles(c)) { t += n; u++; }
     }
     total += t; unique += u;
+    stats.set(s.id, { t, u });
+  }
+  // Per era groeperen; era's nieuwste eerst, sets binnen een era op releasedatum (oud naar nieuw).
+  const eras = new Map();
+  for (const s of sets) {
+    const era = s.serie || state.setList.find((x) => x.id === s.id)?.serie || 'Overige';
+    if (!eras.has(era)) eras.set(era, []);
+    eras.get(era).push(s);
+  }
+  for (const list of eras.values()) list.sort((a, b) => releaseKey(a).localeCompare(releaseKey(b)));
+  const eraList = [...eras].sort((a, b) => releaseKey(b[1][b[1].length - 1]).localeCompare(releaseKey(a[1][a[1].length - 1])));
+  const setRow = (s) => {
+    const { t, u } = stats.get(s.id);
     return `
       <button class="set-row" data-action="open-set" data-set="${esc(s.id)}">
         <div class="set-row-main">
           <div class="set-row-name">${esc(s.name)}</div>
-          <div class="muted small">${esc(s.id)} · ${esc(s.serie)}</div>
+          <div class="muted small">${esc(s.id)}${s.releaseDate ? ` · ${esc(s.releaseDate.slice(0, 4))}` : ''}</div>
         </div>
         <div class="set-row-stats"><b>${t}</b><span class="muted small">${u} uniek</span></div>
       </button>`;
+  };
+  const rows = eraList.map(([era, list]) => {
+    const t = list.reduce((sum, s) => sum + stats.get(s.id).t, 0);
+    return `
+      <details class="acc era" data-era="${esc(era)}" ${state.openEras.has(era) ? 'open' : ''}>
+        <summary><span class="acc-t">${esc(era)}</span><span class="acc-s">${list.length} set${list.length === 1 ? '' : 's'} · ${t} kaarten</span></summary>
+        <div class="era-sets">${list.map(setRow).join('')}</div>
+      </details>`;
   }).join('');
   return `
     <header class="page-head">
@@ -254,7 +284,7 @@ function filteredCards(set) {
   const f = state.invFilter;
   const q = f.q.trim().toLowerCase();
   return set.cards.filter((c) => {
-    if (!f.all && !isNonShiny(c)) return false;
+    if (!f.all && !isNonShiny(c) && !isNonHoloRare(c)) return false;
     if (f.owned && !(state.inventory[c.id] > 0)) return false;
     if (q && !(c.name.toLowerCase().includes(q) || normNr(c.localId) === normNr(q))) return false;
     return true;
@@ -266,7 +296,7 @@ function renderSetDetail(setId) {
   const f = state.invFilter;
   const cards = filteredCards(set);
   let t = 0, u = 0;
-  for (const c of set.cards) { const n = state.inventory[c.id] || 0; if (n > 0 && isNonShiny(c)) { t += n; u++; } }
+  for (const c of set.cards) { const n = state.inventory[c.id] || 0; if (n > 0 && inBundles(c)) { t += n; u++; } }
   const tiles = cards.map((c) => tileHtml(c)).join('');
   return `
     <header class="page-head with-back">
@@ -299,17 +329,53 @@ function tileHtml(c) {
   const n = state.inventory[c.id] || 0;
   const img = imageUrl(c);
   return `
-    <div class="tile ${n > 0 ? 'owned' : ''} ${isNonShiny(c) ? '' : 'shiny'}" data-card="${esc(c.id)}">
+    <div class="tile ${n > 0 ? 'owned' : ''} ${isNonShiny(c) || isNonHoloRare(c) ? '' : 'shiny'}" data-card="${esc(c.id)}">
       <button class="tile-img" data-action="inc" data-card="${esc(c.id)}" aria-label="${esc(c.name)} +1">
         ${img ? `<img loading="lazy" src="${esc(img)}" alt="">` : `<span class="noimg">${esc(c.name)}</span>`}
       </button>
-      <div class="tile-meta"><span class="nr">#${esc(c.localId)}</span> <span class="nm">${esc(c.name)}</span></div>
+      <div class="tile-meta"><span class="nr">#${esc(c.localId)}</span> <span class="nm">${esc(c.name)}</span>${isNonHoloRare(c) ? ' <span class="badge">Rare</span>' : ''}</div>
       <div class="stepper">
         <button data-action="dec" data-card="${esc(c.id)}" aria-label="Eén minder">${icon('minus', 18)}</button>
         <input type="number" inputmode="numeric" min="0" value="${n}" data-input="count" data-card="${esc(c.id)}" aria-label="Aantal ${esc(c.name)}">
         <button data-action="inc" data-card="${esc(c.id)}" aria-label="Eén meer">${icon('plus', 18)}</button>
       </div>
     </div>`;
+}
+
+// Sorteersleutel op releasedatum. Oudere bewaarde sets zonder datum: volgorde uit de setlijst van TCGdex.
+function releaseKey(s) {
+  if (s.releaseDate) return s.releaseDate;
+  const i = state.setList.findIndex((x) => x.id === s.id);
+  if (i >= 0) return `~${String(state.setList.length - i).padStart(5, '0')}`;
+  return `~~${s.id}`;
+}
+
+function inBundles(c) { return isBundleCard(c, state.settings.rareOk); }
+function needsRareOk(c) { return isNonHoloRare(c) && !state.settings.rareOk.includes(c.id); }
+
+// Niet-holo rare uit een oudere set: eerst vragen of hij erbij moet.
+function requestCount(cardId, n) {
+  const card = cardIndex().get(cardId);
+  const cur = state.inventory[cardId] || 0;
+  if (!card || n <= cur || !needsRareOk(card)) { setCount(cardId, n); return; }
+  const img = imageUrl(card);
+  openSheet(`
+    <h2>Niet-holo rare</h2>
+    <div class="rare-ask">
+      ${img ? `<img src="${esc(img)}" alt="">` : ''}
+      <div><b>#${esc(card.localId)} ${esc(card.name)}</b><div class="muted small">${esc(card.setName || '')}</div></div>
+    </div>
+    <p>In oudere sets bestaan rares die niet blinken. Deze kaart is een <b>rare</b>, geen common of uncommon.</p>
+    <p>Wil je hem toevoegen aan je voorraad? Dan kan hij ook in bundels terechtkomen.</p>
+    <div class="btn-row sticky-actions">
+      <button class="btn" data-action="rare-no" data-card="${esc(cardId)}">Niet toevoegen</button>
+      <button class="btn primary" data-action="rare-yes" data-card="${esc(cardId)}" data-n="${n}">${icon('check', 18)} Toevoegen</button>
+    </div>`);
+}
+
+async function approveRare(cardId) {
+  if (!state.settings.rareOk.includes(cardId)) state.settings.rareOk.push(cardId);
+  await save.settings();
 }
 
 function setCount(cardId, n) {
@@ -326,7 +392,7 @@ function setCount(cardId, n) {
   const st = document.getElementById('set-stats');
   if (set && st) {
     let t = 0, u = 0;
-    for (const c of set.cards) { const k = state.inventory[c.id] || 0; if (k > 0 && isNonShiny(c)) { t += k; u++; } }
+    for (const c of set.cards) { const k = state.inventory[c.id] || 0; if (k > 0 && inBundles(c)) { t += k; u++; } }
     st.textContent = `${set.id} · ${t} kaarten · ${u} verschillend`;
   }
 }
@@ -452,6 +518,7 @@ async function doImport() {
   const bySet = {};
   for (const r of parsed.cards) (bySet[r.setId] ||= []).push(r);
   const unmatched = [];
+  const pendingRares = [];
   let added = 0;
   for (const [setId, rows] of Object.entries(bySet)) {
     let set = state.sets[setId];
@@ -475,6 +542,10 @@ async function doImport() {
       if (!card) { unmatched.push(`${r.setId} #${r.localId} ${r.name}`); continue; }
       const cur = state.inventory[card.id] || 0;
       const n = mode === 'set' ? r.count : cur + r.count;
+      if (n > cur && needsRareOk({ ...card, setId: set.id })) {
+        pendingRares.push({ id: card.id, n, add: n - cur, label: `#${card.localId} ${card.name}`, setName: set.name });
+        continue;
+      }
       if (n > 0) state.inventory[card.id] = n; else delete state.inventory[card.id];
       added += r.count;
     }
@@ -482,7 +553,16 @@ async function doImport() {
   await save.settings();
   await save.inventory();
   out.innerHTML = `<p class="ok">${icon('check', 16)} ${added} kaarten verwerkt.</p>` +
-    (unmatched.length ? `<p class="error small">Niet (zeker) gevonden:</p><ul class="small">${unmatched.map((u) => `<li>${esc(u)}</li>`).join('')}</ul>` : '');
+    (unmatched.length ? `<p class="error small">Niet (zeker) gevonden:</p><ul class="small">${unmatched.map((u) => `<li>${esc(u)}</li>`).join('')}</ul>` : '') +
+    (pendingRares.length ? `
+      <div class="rare-box" id="rare-box">
+        <p><b>${pendingRares.length} niet-holo rare${pendingRares.length > 1 ? 's' : ''}</b> uit oudere sets. Die zijn nog <b>niet</b> toegevoegd. Vink aan welke erbij mogen:</p>
+        ${pendingRares.map((p) => `<label class="check"><input type="checkbox" checked data-rare="${esc(p.id)}" data-n="${p.n}"> ${esc(p.label)} <span class="muted small">+${p.add} · ${esc(p.setName)}</span></label>`).join('')}
+        <div class="btn-row">
+          <button class="btn small" data-action="rare-import-skip">Niet toevoegen</button>
+          <button class="btn primary small" data-action="rare-import">${icon('check', 16)} Aangevinkte toevoegen</button>
+        </div>
+      </div>` : '');
   render();
 }
 
@@ -877,10 +957,26 @@ async function onClick(e) {
     case 'close-set': state.invSet = null; render(); break;
     case 'flt-all': state.invFilter.all = el.dataset.val === '1'; render(); break;
     case 'flt-owned': state.invFilter.owned = !state.invFilter.owned; render(); break;
-    case 'inc': setCount(el.dataset.card, (state.inventory[el.dataset.card] || 0) + 1); break;
+    case 'inc': requestCount(el.dataset.card, (state.inventory[el.dataset.card] || 0) + 1); break;
     case 'dec': setCount(el.dataset.card, (state.inventory[el.dataset.card] || 0) - 1); break;
     case 'import': importSheet(); break;
     case 'do-import': await doImport(); break;
+    case 'rare-yes': await approveRare(el.dataset.card); closeSheet(); setCount(el.dataset.card, Number(el.dataset.n)); toast('Rare toegevoegd.'); break;
+    case 'rare-no': closeSheet(); setCount(el.dataset.card, state.inventory[el.dataset.card] || 0); break;
+    case 'rare-import': {
+      let n = 0;
+      for (const cb of document.querySelectorAll('#rare-box input[data-rare]')) {
+        if (!cb.checked) continue;
+        await approveRare(cb.dataset.rare);
+        state.inventory[cb.dataset.rare] = Number(cb.dataset.n);
+        n++;
+      }
+      await save.inventory();
+      $('#rare-box').innerHTML = `<p class="ok">${icon('check', 16)} ${n} rare${n === 1 ? '' : 's'} toegevoegd.</p>`;
+      render();
+      break;
+    }
+    case 'rare-import-skip': $('#rare-box').innerHTML = '<p class="muted small">Rares niet toegevoegd.</p>'; break;
     case 'copy-prompt': {
       const txt = claudePrompt(state.sets[el.dataset.set]);
       try { await navigator.clipboard.writeText(txt); toast('Prompt gekopieerd. Plak hem in Claude met je foto\'s.'); }
@@ -942,7 +1038,7 @@ function onInput(e) {
 
 async function onChange(e) {
   const el = e.target;
-  if (el.dataset.input === 'count') setCount(el.dataset.card, Number(el.value));
+  if (el.dataset.input === 'count') requestCount(el.dataset.card, Number(el.value));
   if (el.dataset.input === 'restore' && el.files?.[0]) await restoreBackup(el.files[0]);
   if (el.dataset.setting) {
     const path = el.dataset.setting.split('.');
@@ -969,11 +1065,17 @@ async function start() {
   persist();
   render();
   if (!state.setList.length) {
-    listSets().then((l) => { state.setList = l; if (state.view === 'set') render(); }).catch(() => {});
+    listSets().then((l) => { state.setList = l; if (state.view === 'set' || state.view === 'inv') render(); }).catch(() => {});
   }
+  fillReleaseDates(Object.values(state.sets)).then((ch) => { if (ch && state.view === 'inv') render(); }).catch(() => {});
   $('#upd').addEventListener('click', () => { if (swWaiting) swWaiting.postMessage('skip'); else location.reload(); });
   document.addEventListener('toggle', (e) => {
     const d = e.target;
+    if (d.dataset?.era) {
+      if (d.open) state.openEras.add(d.dataset.era); else state.openEras.delete(d.dataset.era);
+      saveOpenEras();
+      return;
+    }
     if (!d.dataset?.acc) return;
     if (d.open) {
       state.openAcc = d.dataset.id;

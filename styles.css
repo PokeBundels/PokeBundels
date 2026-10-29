@@ -263,3 +263,13 @@ details.acc > summary:focus-visible { outline: 2px solid var(--accent); outline-
   background: var(--accent); color: var(--accent-ink); border: 0; border-radius: 12px; padding: 14px; min-height: 48px;
   font: inherit; font-weight: 700; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35); cursor: pointer; }
 .upd[hidden] { display: none; }
+
+/* Inventaris per era */
+.era-sets { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px 12px; border-top: 1px solid var(--line); }
+.era-sets .set-row { flex: none; }
+
+/* Niet-holo rares */
+.rare-ask { display: flex; align-items: center; gap: 14px; margin: 8px 0 12px; }
+.rare-ask img { width: 90px; border-radius: 6px; flex: none; }
+.rare-box { margin-top: 12px; padding: 12px; border: 1px solid var(--accent); border-radius: var(--radius); }
+.rare-box .check { display: flex; gap: 8px; align-items: center; margin: 6px 0; }
