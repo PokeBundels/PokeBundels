@@ -2,7 +2,7 @@
 
 // Standaardteksten voor zoekertjes. {naam} = naam gekozen bij Maak (standaard de naam uit Instellingen),
 // {pokemon} = gekozen Pokémon bij Maak. {cu} = gewone kaarten + energy samen. Invulvelden: {naam} {kaarten} {cu} {holo} {energy} {extras} {set} {prijs}
-// {hashtag} {hashtagsoort} {hashtagset} {zoekwoorden}. Een regel waarin een invulveld leeg of 0 is, valt weg.
+// {hashtag} {hashtagsoort} {hashtagset} {hashtagpokemon} {zoekwoorden}. Een regel waarin een invulveld leeg of 0 is, valt weg.
 export const TEMPLATES = {
   tinTitle: '{naam} met {kaarten} Pokémon kaarten ({set})',
   tinText: [
@@ -16,7 +16,7 @@ export const TEMPLATES = {
     'Zelf uit boosters getrokken, overschot van mijn eigen verzameling.',
     'Leuk als cadeautje of om een verzameling mee te beginnen.',
     '',
-    '{hashtag} {hashtagsoort} {hashtagset}',
+    '{hashtag} {hashtagsoort} {hashtagset} {hashtagpokemon}',
     '',
     '{zoekwoorden}',
   ].join('\n'),
@@ -32,7 +32,7 @@ export const TEMPLATES = {
     'Zelf uit boosters getrokken, overschot van mijn eigen verzameling.',
     'Je krijgt de kaarten van de foto’s.',
     '',
-    '{hashtag} {hashtagsoort} {hashtagset}',
+    '{hashtag} {hashtagsoort} {hashtagset} {hashtagpokemon}',
     '',
     '{zoekwoorden}',
   ].join('\n'),
@@ -67,7 +67,7 @@ export function defaultPacks() {
 export const DEFAULT_SETTINGS = {
   packs: defaultPacks(),
   activeMode: 1,
-  packsVersion: 4,
+  packsVersion: 5,
   hashtag: 'pokebundelsbe',
   keywords: 'pokemon pokémon pokemonkaarten pokemoncards kaarten scarlet violet cadeau cadeautje cadeautip verjaardag verjaardagscadeau sinterklaas kerst verzamelen setje bundel tradingcards tcg',
   mySets: [],
@@ -121,6 +121,14 @@ export function migrateSettings(saved) {
       if (i >= 0) { lines.splice(i + 1, 0, '• Met o.a. {pokemon}'); p.text = lines.join('\n'); }
     }
     out.packsVersion = 4;
+  }
+  if ((saved?.packsVersion || 0) < 5) {
+    // hashtags van de Pokémon in de tin/bundel achter de andere hashtags
+    for (const p of out.packs) {
+      if (String(p.text || '').includes('{hashtagpokemon}')) continue;
+      p.text = String(p.text || '').replace('{hashtagset}', '{hashtagset} {hashtagpokemon}');
+    }
+    out.packsVersion = 5;
   }
   for (const k of ['bonusThreshold', 'setBundle', 'randomBundle', 'tins', 'themeBundle', 'themes', 'themesFromPremium', 'premiumSets', 'premiumBundle', 'premiumRestToRandom']) delete out[k];
   return out;

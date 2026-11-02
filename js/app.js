@@ -6,7 +6,7 @@ import {
   MODES, TEMPLATES, analysePlan, themeOf, nameMatches, defaultPacks, migrateSettings, parseExtras, isNonShiny, isNonHoloRare, isBundleCard, normNr, parseImport, pickVaried,
 } from './logic.js';
 
-const VERSION = '2.7.0';
+const VERSION = '2.7.1';
 const DAC7 = { sales: 30, revenue: 2000 };
 const PLATFORMS = ['Vinted', '2dehands', 'Anders'];
 
@@ -1073,6 +1073,8 @@ function mixedSetsText(b) {
 }
 
 function listingFor(b) {
+  // namen van gekozen en thema-Pokémon, zonder "ex" en zonder dubbels (voor hashtags en zoekwoorden)
+  const pokeNames = [...new Set((b.pokemon || []).map((x) => String(x.name).replace(/\s+ex$/i, '').trim()).filter(Boolean))];
   const pk = packById(b.packId) || { kind: b.type === 'tin' ? 'tin' : 'bundle', name: b.name || b.label };
   const S = state.settings;
   const tag = (S.hashtag || '').replace(/^#/, '').trim();
@@ -1089,8 +1091,9 @@ function listingFor(b) {
     prijs: eur(b.price),
     hashtag: tag ? `#${tag}` : '',
     hashtagsoort: tag ? `#${tag}${pk.kind === 'tin' ? 'tins' : 'bundels'}` : '',
+    hashtagpokemon: pokeNames.map((n) => `#${n.replace(/[^A-Za-z0-9]/g, '')}`).join(' '),
     hashtagset: tag && setLabel ? `#${tag}${setLabel.replace(/[^A-Za-z0-9]/g, '')}` : '',
-    zoekwoorden: S.keywords || '',
+    zoekwoorden: [S.keywords || '', ...pokeNames.map((n) => n.toLowerCase())].filter(Boolean).join(' '),
   };
   const kind = pk.kind === 'tin' ? 'tin' : 'bundle';
   return {
@@ -1306,7 +1309,7 @@ function renderSettings() {
       <label class="field"><span>Eigen hashtag (zonder #)</span><input class="input" ${state.editSec === 'listing' ? '' : 'readonly'} value="${esc(S.hashtag || '')}" data-text-setting="hashtag"></label>
       <label class="field"><span>Zoekwoorden onderaan</span><textarea class="input" rows="4" ${state.editSec === 'listing' ? '' : 'readonly'} data-text-setting="keywords">${esc(S.keywords || '')}</textarea></label>
       ${state.editSec === 'listing' ? editBar('listing') : ''}
-      <p class="muted small">Invulvelden in de teksten van tins en bundels: {naam} (naam bij Maak) {pokemon} (gekozen Pokémon) {kaarten} {cu} (gewoon + energy) {holo} {energy} {extras} {set} {prijs} {hashtag} {hashtagsoort} {hashtagset} {zoekwoorden}. De app vult ze automatisch in; je hoeft niets manueel te vervangen. Een regel waarin een invulveld leeg of 0 is, valt weg.</p>`)}
+      <p class="muted small">Invulvelden in de teksten van tins en bundels: {naam} (naam bij Maak) {pokemon} (gekozen Pokémon) {kaarten} {cu} (gewoon + energy) {holo} {energy} {extras} {set} {prijs} {hashtag} {hashtagsoort} {hashtagset} {hashtagpokemon} (hashtags van de Pokémon) {zoekwoorden}. De app vult ze automatisch in; je hoeft niets manueel te vervangen. Een regel waarin een invulveld leeg of 0 is, valt weg.</p>`)}
     ${acc('backup', 'Back-up', 'alles staat enkel op dit toestel', `
       <p class="muted small">Maak geregeld een back-up: zo raak je je voorraad, bundels en verkopen niet kwijt.</p>
       <div class="btn-row">
