@@ -6,7 +6,7 @@ import {
   MODES, TEMPLATES, analysePlan, defaultPacks, migrateSettings, parseExtras, isNonShiny, isNonHoloRare, isBundleCard, normNr, parseImport, pickVaried,
 } from './logic.js';
 
-const VERSION = '2.5.1';
+const VERSION = '2.5.2';
 const DAC7 = { sales: 30, revenue: 2000 };
 const PLATFORMS = ['Vinted', '2dehands', 'Anders'];
 
@@ -26,7 +26,7 @@ function saveUi() {
   try {
     localStorage.setItem(UI_KEY, JSON.stringify({
       at: Date.now(), view: state.view, sub: state.sub, invSet: state.invSet,
-      openEras: [...state.openEras], openAcc: state.openAcc, openPack: state.openPack, scroll: window.scrollY,
+      openAcc: state.openAcc, openPack: state.openPack, scroll: window.scrollY,
     }));
   } catch { /* geen opslag */ }
 }
@@ -156,7 +156,7 @@ function navSync() {
 }
 function navBack() {
   if (!$('#sheet').hidden) { closeSheet(); return; }
-  if (state.view === 'inv' && state.invSet) { state.invSet = null; render(); return; }
+  if (state.view === 'inv' && state.invSet) { leaveSet(); render(); return; }
   if (state.view !== 'inv') { state.view = 'inv'; state.invSet = null; render(); window.scrollTo(0, 0); }
 }
 window.addEventListener('popstate', () => {
@@ -361,6 +361,16 @@ function tileHtml(c) {
 }
 
 // Sorteersleutel op releasedatum. Oudere bewaarde sets zonder datum: volgorde uit de setlijst van TCGdex.
+// Era's zijn alleen open terwijl je erin bezig bent: terug uit een set = enkel die era open.
+function eraOf(setId) {
+  const s = state.sets[setId];
+  return s?.serie || state.setList.find((x) => x.id === setId)?.serie || 'Overige';
+}
+function leaveSet() {
+  state.openEras = state.invSet ? new Set([eraOf(state.invSet)]) : new Set();
+  state.invSet = null;
+}
+
 function releaseKey(s) {
   if (s.releaseDate) return s.releaseDate;
   const i = state.setList.findIndex((x) => x.id === s.id);
@@ -1278,7 +1288,7 @@ async function onClick(e) {
   const act = el.dataset.action;
   if (act !== 'pick' && el.tagName !== 'INPUT') e.preventDefault();
   switch (act) {
-    case 'nav': state.view = el.dataset.view; if (state.view === 'inv') state.invSet = null; render(); window.scrollTo(0, 0); break;
+    case 'nav': state.view = el.dataset.view; state.invSet = null; state.openEras = new Set(); render(); window.scrollTo(0, 0); break;
     case 'close-sheet': closeSheet(); break;
     case 'add-set': addSetFlow(); break;
     case 'pick-set': await loadSet(el.dataset.set); break;
@@ -1289,7 +1299,7 @@ async function onClick(e) {
       break;
     }
     case 'open-set': state.invSet = el.dataset.set; render(); window.scrollTo(0, 0); break;
-    case 'close-set': state.invSet = null; render(); break;
+    case 'close-set': leaveSet(); render(); break;
     case 'flt-all': state.invFilter.all = el.dataset.val === '1'; render(); break;
     case 'flt-owned': state.invFilter.owned = !state.invFilter.owned; render(); break;
     case 'inc': requestCount(el.dataset.card, (state.inventory[el.dataset.card] || 0) + 1); break;
@@ -1515,7 +1525,6 @@ async function start() {
     if (['inv', 'ana', 'prep', 'sell', 'sale', 'set'].includes(ui.view)) state.view = ui.view;
     state.sub = { ...state.sub, ...(ui.sub || {}) };
     state.invSet = ui.invSet && state.sets[ui.invSet] ? ui.invSet : null;
-    state.openEras = new Set(ui.openEras || []);
     state.openAcc = ui.openAcc || null;
     state.openPack = ui.openPack || null;
   }
