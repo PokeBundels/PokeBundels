@@ -6,7 +6,7 @@ import {
   MODES, TEMPLATES, analysePlan, themeOf, nameMatches, defaultPacks, migrateSettings, parseExtras, isNonShiny, isNonHoloRare, isBundleCard, normNr, parseImport, pickVaried,
 } from './logic.js';
 
-const VERSION = '2.8.0';
+const VERSION = '2.8.1';
 const DAC7 = { sales: 30, revenue: 2000 };
 const PLATFORMS = ['Vinted', '2dehands', 'Anders'];
 

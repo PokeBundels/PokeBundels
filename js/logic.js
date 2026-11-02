@@ -59,15 +59,15 @@ const TIN_DEFAULTS = [
 export function defaultPacks() {
   return [
     ...TIN_DEFAULTS.map((t) => pack(t.id, 'tin', t.name, t.cu, t.shiny, t.price, 'mix', { energy: t.energy, extras: t.extras })),
-    pack('set', 'bundle', 'Setbundel', 45, 5, 6, 'perset'),
-    pack('random', 'bundle', 'Random bundel', 45, 5, 4.5, 'mix'),
+    pack('set', 'bundle', 'Setbundel', 40, 5, 6, 'perset', { energy: 5 }),
+    pack('random', 'bundle', 'Random bundel', 40, 5, 4.5, 'mix', { energy: 5 }),
   ];
 }
 
 export const DEFAULT_SETTINGS = {
   packs: defaultPacks(),
   activeMode: 1,
-  packsVersion: 5,
+  packsVersion: 6,
   hashtag: 'pokebundelsbe',
   keywords: 'pokemon pokémon pokemonkaarten pokemoncards kaarten scarlet violet cadeau cadeautje cadeautip verjaardag verjaardagscadeau sinterklaas kerst verzamelen setje bundel tradingcards tcg',
   mySets: [],
@@ -129,6 +129,13 @@ export function migrateSettings(saved) {
       p.text = String(p.text || '').replace('{hashtagset}', '{hashtagset} {hashtagpokemon}');
     }
     out.packsVersion = 5;
+  }
+  if ((saved?.packsVersion || 0) < 6) {
+    // bundels: 45 gewone kaarten = 40 uit de inventaris + 5 energy (zoals de tins)
+    for (const p of out.packs) {
+      if (p.kind !== 'tin' && (p.energy || 0) === 0 && p.cu >= 5) { p.cu -= 5; p.energy = 5; }
+    }
+    out.packsVersion = 6;
   }
   for (const k of ['bonusThreshold', 'setBundle', 'randomBundle', 'tins', 'themeBundle', 'themes', 'themesFromPremium', 'premiumSets', 'premiumBundle', 'premiumRestToRandom']) delete out[k];
   return out;
