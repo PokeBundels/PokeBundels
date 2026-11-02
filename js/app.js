@@ -6,7 +6,7 @@ import {
   MODES, TEMPLATES, analysePlan, defaultPacks, migrateSettings, parseExtras, isNonShiny, isNonHoloRare, isBundleCard, normNr, parseImport, pickVaried,
 } from './logic.js';
 
-const VERSION = '2.5.2';
+const VERSION = '2.5.3';
 const DAC7 = { sales: 30, revenue: 2000 };
 const PLATFORMS = ['Vinted', '2dehands', 'Anders'];
 
@@ -602,7 +602,7 @@ function packById(id) { return state.settings.packs.find((p) => p.id === id); }
 function tinPacks() { return state.settings.packs.filter((p) => p.kind === 'tin'); }
 function bundlePacks() { return state.settings.packs.filter((p) => p.kind !== 'tin'); }
 function sourceName(src) {
-  if (src === 'mix') return 'alle sets gemengd';
+  if (src === 'mix') return 'willekeurige sets';
   if (src === 'perset') return 'per set';
   return setName(src);
 }
@@ -999,6 +999,18 @@ function fillTemplate(tpl, vars) {
   }).filter((l) => l !== null).join('\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
+// Voor tins/bundels uit willekeurige sets: noem de era's waar de kaarten effectief uit komen,
+// bv. "verschillende Scarlet & Violet en Mega Evolution sets".
+function mixedSetsText(b) {
+  const idx = cardIndex();
+  const eras = [...new Set((b.cards || []).map((x) => idx.get(x.id)?.setId).filter(Boolean).map(eraOf))];
+  const all = eras.length ? eras : [...new Set(state.settings.mySets.map(eraOf))];
+  const order = ['Scarlet & Violet', 'Mega Evolution'];
+  all.sort((x, y) => (order.indexOf(x) + 1 || 99) - (order.indexOf(y) + 1 || 99));
+  const names = all.length > 1 ? `${all.slice(0, -1).join(', ')} en ${all[all.length - 1]}` : (all[0] || 'Pokémon');
+  return `verschillende ${names} sets`;
+}
+
 function listingFor(b) {
   const pk = packById(b.packId) || { kind: b.type === 'tin' ? 'tin' : 'bundle', name: b.name || b.label };
   const S = state.settings;
@@ -1012,7 +1024,7 @@ function listingFor(b) {
     holo: b.shiny || 0,
     energy: b.energy || 0,
     extras: parseExtras(b.extras).map((x) => x.label).join(', '),
-    set: setLabel || 'verschillende Scarlet & Violet sets',
+    set: setLabel || mixedSetsText(b),
     prijs: eur(b.price),
     hashtag: tag ? `#${tag}` : '',
     hashtagsoort: tag ? `#${tag}${pk.kind === 'tin' ? 'tins' : 'bundels'}` : '',
@@ -1167,7 +1179,7 @@ function editBar(id) {
 
 function packEditor(p) {
   const sets = state.settings.mySets.map((id) => [id, setName(id)]).sort((x, y) => x[1].localeCompare(y[1]));
-  const src = [['mix', 'Alle sets gemengd'], ['perset', 'Per set (apart per set)'], ...sets]
+  const src = [['mix', 'Willekeurige sets'], ['perset', 'Per set (apart per set)'], ...sets]
     .map(([v, l]) => `<option value="${esc(v)}" ${p.source === v ? 'selected' : ''}>${esc(l)}</option>`).join('');
   const ed = state.editSec === `pack:${p.id}`;
   const lock = ed ? '' : 'readonly';
@@ -1208,7 +1220,7 @@ function packList(kind) {
   return `
     <p class="muted small">${kind === 'tin'
     ? 'Tins krijgen in de analyse altijd voorrang, in deze volgorde. "Gewoon" = common/uncommon uit je inventaris; holo/reverse, energy en extra\'s neem je er zelf bij.'
-    : 'Bundels komen na de tins, in deze volgorde. Zet een bundel "uit alle sets gemengd" onderaan: die krijgt het overschot.'}</p>
+    : 'Bundels komen na de tins, in deze volgorde. Zet een bundel met "Willekeurige sets" onderaan: die krijgt het overschot.'}</p>
     <div class="packs">${list.map(packEditor).join('') || '<p class="muted small">Nog geen.</p>'}</div>
     <div class="btn-row"><button class="btn small" data-action="pack-add" data-kind="${kind}">${icon('plus', 16)} ${kind === 'tin' ? 'Tin' : 'Bundel'} toevoegen</button></div>`;
 }
