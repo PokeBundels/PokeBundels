@@ -6,7 +6,7 @@ import {
   MODES, TEMPLATES, analysePlan, themeOf, nameMatches, defaultPacks, migrateSettings, parseExtras, isNonShiny, isNonHoloRare, isBundleCard, normNr, parseImport, pickVaried,
 } from './logic.js';
 
-const VERSION = '2.8.1';
+const VERSION = '2.9.0';
 const DAC7 = { sales: 30, revenue: 2000 };
 const PLATFORMS = ['Vinted', '2dehands', 'Anders'];
 
@@ -70,10 +70,10 @@ async function load() {
   state.bundles = bundles || [];
   state.sales = sales || [];
   state.setList = (await db.get('setlist2'))?.sets || [];
-  for (const id of state.settings.mySets) {
-    const s = await db.get(`set:${id}`);
-    if (s) state.sets[id] = s;
-  }
+  // sets tegelijk inlezen in plaats van één voor één (snellere opstart)
+  const sets = await Promise.all(state.settings.mySets.map((id) => db.get(`set:${id}`)));
+  for (const s of sets) if (s) state.sets[s.id] = s;
+  setsChanged();
 }
 
 const save = {
@@ -85,10 +85,14 @@ const save = {
 
 // ---------- helpers ----------
 
+// Alle kaarten van alle sets op ID. Wordt hergebruikt tot er een set bijkomt, verdwijnt of vernieuwd wordt.
+let cardIdx = null;
+function setsChanged() { cardIdx = null; }
 function cardIndex() {
-  const map = new Map();
-  for (const s of Object.values(state.sets)) for (const c of s.cards) map.set(c.id, { ...c, setId: s.id, setName: s.name });
-  return map;
+  if (cardIdx) return cardIdx;
+  cardIdx = new Map();
+  for (const s of Object.values(state.sets)) for (const c of s.cards) cardIdx.set(c.id, { ...c, setId: s.id, setName: s.name });
+  return cardIdx;
 }
 
 function inventoryCards() {
@@ -497,6 +501,7 @@ async function loadSet(setId, { force = false, open = true } = {}) {
       },
     });
     state.sets[set.id] = set;
+    setsChanged();
     if (!state.settings.mySets.includes(set.id)) { state.settings.mySets.push(set.id); await save.settings(); }
     state.analysisCache = {};
     closeSheet();
@@ -555,6 +560,7 @@ async function doImport() {
       try {
         set = await getSet(setId, { onProgress: (d, t) => { out.innerHTML = `<p class="muted">Set ${esc(setId)} laden… ${d}/${t}</p>`; } });
         state.sets[set.id] = set;
+        setsChanged();
         if (!state.settings.mySets.includes(set.id)) state.settings.mySets.push(set.id);
       } catch {
         unmatched.push(...rows.map((r) => `${r.setId} #${r.localId} ${r.name} (set onbekend)`));
@@ -1123,7 +1129,7 @@ function renderSales() {
   const total = yearSales.reduce((a, s) => a + s.price, 0);
   const list = state.sales.map((s) => `
     <li class="sale">
-      <div><b>${esc(s.platform)}</b> <span class="muted small">${esc(s.date)}</span>${s.bonus ? ' <span class="badge">+bonus</span>' : ''}
+      <div><b>${esc(s.platform)}</b> <span class="muted small">${esc(s.date)}</span>
         <div class="small muted">${s.labels.map(esc).join(' · ')}</div></div>
       <b>${eur(s.price)}</b>
       <button class="btn ghost small" data-action="undo-sale" data-id="${s.id}" title="Verkoop ongedaan maken">Ongedaan</button>
@@ -1274,7 +1280,7 @@ async function restoreBackup(file) {
     for (const id of state.settings.mySets) {
       if (!state.sets[id]) {
         const s = await db.get(`set:${id}`);
-        if (s) state.sets[id] = s; else await loadSet(id, { open: false });
+        if (s) { state.sets[id] = s; setsChanged(); } else await loadSet(id, { open: false });
       }
     }
     toast('Back-up teruggezet.');
@@ -1339,6 +1345,7 @@ async function onClick(e) {
       for (const c of set.cards) delete state.inventory[c.id];
       state.settings.mySets = state.settings.mySets.filter((x) => x !== id);
       delete state.sets[id];
+      setsChanged();
       state.invSet = null;
       await save.settings(); await save.inventory();
       render();

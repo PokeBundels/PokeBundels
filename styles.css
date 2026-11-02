@@ -93,7 +93,6 @@ a { color: var(--accent); }
 .btn-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 12px 0; }
 .sticky-actions { position: sticky; bottom: 0; padding: 12px 0 4px; margin-bottom: 0; background: linear-gradient(transparent, var(--surface) 30%); justify-content: flex-end; }
 .sheet .sticky-actions { background: linear-gradient(transparent, var(--bg) 30%); }
-.pill { display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; border-radius: 999px; background: rgba(79, 216, 168, 0.14); color: var(--ok); font-weight: 700; font-size: 14px; }
 .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; letter-spacing: 0.06em; background: var(--surface-2); color: var(--text); vertical-align: middle; }
 .badge.gold { background: var(--accent); color: var(--accent-ink); }
 
@@ -134,8 +133,6 @@ textarea.input { resize: vertical; }
 .field { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; font-size: 14px; color: var(--muted); }
 .check { display: flex; align-items: center; gap: 10px; min-height: 44px; cursor: pointer; }
 .check input { width: 20px; height: 20px; accent-color: var(--accent); flex: none; }
-.three { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
-.three .field { margin: 0; }
 
 /* grid */
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 8px; margin-top: 8px; }
@@ -152,7 +149,6 @@ textarea.input { resize: vertical; }
 .stepper button { height: 34px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface-2); color: var(--text); display: grid; place-items: center; cursor: pointer; padding: 0; }
 .stepper input { height: 34px; width: 100%; text-align: center; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--text); font: inherit; font-weight: 700; -moz-appearance: textfield; }
 .stepper input::-webkit-outer-spin-button, .stepper input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-.danger-zone { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 24px; border-top: 1px solid var(--line); padding-top: 12px; }
 
 /* segs */
 .segs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; padding: 4px; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; }
@@ -163,11 +159,6 @@ textarea.input { resize: vertical; }
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; margin: 14px 0; }
 fieldset.card { margin: 14px 0; }
 legend { padding: 0 6px; font-weight: 700; font-family: 'Bricolage Grotesque', sans-serif; font-size: 17px; }
-.tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
-.tbl th { text-align: left; color: var(--muted); font-weight: 500; font-size: 12px; padding: 6px 4px; border-bottom: 1px solid var(--line); }
-.tbl td { padding: 8px 4px; border-bottom: 1px solid var(--line); vertical-align: top; }
-.tbl tr:last-child td { border-bottom: 0; }
-.tbl .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .kv { list-style: none; margin: 0; padding: 0; }
 .kv li { display: flex; justify-content: space-between; gap: 12px; padding: 7px 0; border-bottom: 1px solid var(--line); }
 .kv li:last-child { border-bottom: 0; }
@@ -274,12 +265,6 @@ details.acc > summary:focus-visible { outline: 2px solid var(--accent); outline-
 .rare-box { margin-top: 12px; padding: 12px; border: 1px solid var(--accent); border-radius: var(--radius); }
 .rare-box .check { display: flex; gap: 8px; align-items: center; margin: 6px 0; }
 
-/* Tins */
-.tin-opt .tin-src { margin-top: 6px; min-height: 38px; padding: 6px 10px; }
-.tin-edit { padding: 12px 0; border-bottom: 1px solid var(--line); }
-.tin-edit .four { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
-.tin-edit .field span { white-space: nowrap; }
-.tin-edit .four .field { margin: 0; }
 
 /* Te verkopen */
 .sell-item { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px; margin-bottom: 10px; }

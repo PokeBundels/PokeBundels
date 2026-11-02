@@ -81,8 +81,8 @@ export function migrateSettings(saved) {
     const packs = defaultPacks();
     const setB = packs.find((p) => p.id === 'set');
     const rndB = packs.find((p) => p.id === 'random');
-    if (saved?.setBundle) Object.assign(setB, { cu: saved.setBundle.size - saved.setBundle.shiny, shiny: saved.setBundle.shiny, price: saved.setBundle.price });
-    if (saved?.randomBundle) Object.assign(rndB, { cu: saved.randomBundle.size - saved.randomBundle.shiny, shiny: saved.randomBundle.shiny, price: saved.randomBundle.price });
+    if (saved?.setBundle) Object.assign(setB, { energy: 0, cu: saved.setBundle.size - saved.setBundle.shiny, shiny: saved.setBundle.shiny, price: saved.setBundle.price });
+    if (saved?.randomBundle) Object.assign(rndB, { energy: 0, cu: saved.randomBundle.size - saved.randomBundle.shiny, shiny: saved.randomBundle.shiny, price: saved.randomBundle.price });
     for (const t of saved?.tins || []) {
       packs.splice(packs.findIndex((p) => p.kind === 'bundle'), 0,
         pack(t.id, 'tin', t.name, Math.max(0, t.size - t.shiny), t.shiny, t.price, 'mix', { stock: t.stock }));
@@ -221,30 +221,31 @@ export function maxBundles(counts, n, k) {
 /**
  * Stel één bundel samen uit een pool: telkens één exemplaar nemen van de kaart
  * met het hoogste resterende aantal die nog niet k keer in deze bundel zit.
+ * Bij gelijke stand wint de laagste rang (rank: Map id -> getal; zonder rank: volgorde van de pool).
  * pool: Map(id -> count) — wordt aangepast. Geeft [{id, count}] of null als het niet lukt.
  */
-export function pickOne(pool, n, k, tiebreak) {
-  const taken = new Map();
-  for (let i = 0; i < n; i++) {
-    let bestId = null;
-    let bestC = 0;
-    for (const [id, c] of pool) {
-      if (c <= 0) continue;
-      if ((taken.get(id) || 0) >= k) continue;
-      if (c > bestC || (c === bestC && tiebreak && bestId !== null && tiebreak(id, bestId) < 0)) {
-        bestC = c;
-        bestId = id;
-      }
+export function pickOne(pool, n, k, rank = null) {
+  const ids = [];
+  const cnt = [];
+  for (const [id, c] of pool) if (c > 0) { ids.push(id); cnt.push(c); }
+  const rk = ids.map((id, i) => (rank ? (rank.get(id) ?? i) : i));
+  const taken = new Array(ids.length).fill(0);
+  const out = [];
+  for (let step = 0; step < n; step++) {
+    let best = -1;
+    for (let i = 0; i < ids.length; i++) {
+      const c = cnt[i] - taken[i];
+      if (c <= 0 || taken[i] >= k) continue;
+      if (best < 0) { best = i; continue; }
+      const bc = cnt[best] - taken[best];
+      if (c > bc || (c === bc && rk[i] < rk[best])) best = i;
     }
-    if (bestId === null) {
-      // terugdraaien
-      for (const [id, t] of taken) pool.set(id, pool.get(id) + t);
-      return null;
-    }
-    pool.set(bestId, bestC - 1);
-    taken.set(bestId, (taken.get(bestId) || 0) + 1);
+    if (best < 0) return null; // pool blijft ongewijzigd
+    if (taken[best] === 0) out.push(best);
+    taken[best]++;
   }
-  return [...taken].map(([id, count]) => ({ id, count }));
+  for (const i of out) pool.set(ids[i], cnt[i] - taken[i]);
+  return out.map((i) => ({ id: ids[i], count: taken[i] }));
 }
 
 /**
@@ -283,7 +284,7 @@ export function pickVaried(cards, n, k, B, avoid = new Set(), rnd = Math.random,
     // 2. al gebruikte kaarten achteraan, daarna de grootste stapels eerst
     () => byOrder([...base].sort((a, b) => av(a.id) - av(b.id) || b.count - a.count || r.get(a.id) - r.get(b.id))),
     // 3. grootste stapels eerst (haalt altijd het maximum), bij gelijke stand variatie
-    () => pickOne(new Map(base.map((c) => [c.id, c.count])), n, k, (a, b) => av(a) - av(b) || r.get(a) - r.get(b)),
+    () => pickOne(new Map(base.map((c) => [c.id, c.count])), n, k, new Map(base.map((c) => [c.id, av(c.id) * 2 + r.get(c.id)]))),
   ];
   for (const t of tries) {
     const b = t();
@@ -293,7 +294,7 @@ export function pickVaried(cards, n, k, B, avoid = new Set(), rnd = Math.random,
 }
 
 /** Verdeel zo veel mogelijk bundels uit een lijst kaarten [{id,count}]. */
-export function allocate(cards, n, k, tiebreak, cap = Infinity) {
+export function allocate(cards, n, k, rank = null, cap = Infinity) {
   const counts = cards.map((c) => c.count).filter((c) => c > 0);
   let B = Math.min(cap, maxBundles(counts, n, k));
   while (B > 0) {
@@ -301,7 +302,7 @@ export function allocate(cards, n, k, tiebreak, cap = Infinity) {
     const bundles = [];
     let ok = true;
     for (let b = 0; b < B; b++) {
-      const one = pickOne(pool, n, k, tiebreak);
+      const one = pickOne(pool, n, k, rank);
       if (!one) { ok = false; break; }
       bundles.push(one);
     }
@@ -335,12 +336,11 @@ export function analysePlan(cards, settings, k, setNames = {}) {
   const eligible = cards.filter((c) => c.count > 0 && isBundleCard(c, settings.rareOk || []));
   const byId = new Map(eligible.map((c) => [c.id, c]));
   const remaining = new Map(eligible.map((c) => [c.id, c.count]));
-  const order = (a, b) => {
-    const A = byId.get(a), Bc = byId.get(b);
-    if (!A || !Bc) return 0;
-    if (A.setId !== Bc.setId) return A.setId < Bc.setId ? -1 : 1;
-    return String(A.localId).localeCompare(String(Bc.localId), undefined, { numeric: true });
-  };
+  // vaste volgorde bij gelijke stand: set, dan kaartnummer (één keer sorteren, daarna enkel getallen vergelijken)
+  const order = new Map([...eligible]
+    .sort((A, Bc) => (A.setId !== Bc.setId ? (A.setId < Bc.setId ? -1 : 1)
+      : String(A.localId).localeCompare(String(Bc.localId), undefined, { numeric: true })))
+    .map((c, i) => [c.id, i]));
   const setIds = [...new Set(eligible.map((c) => c.setId))].sort((a, b) => (setNames[a] || a).localeCompare(setNames[b] || b));
   const poolOf = (src) => [...remaining]
     .filter(([id, c]) => c > 0 && (src === 'mix' || byId.get(id).setId === src))

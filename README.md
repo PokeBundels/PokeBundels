@@ -14,13 +14,12 @@ Updates: overschrijf de bestanden in de repository. Verhoog dan ook `VERSION` in
 
 ## Werkwijze
 
-1. **Inventaris → Set toevoegen.** De app haalt de kaartenlijst op bij TCGdex (Engelse kaarten). Dat gebeurt één keer per set en wordt lokaal bewaard.
-2. **Kaarten toevoegen**
-   - Met de knoppen − / + of door op een kaart te tikken, of
-   - via Claude: tik in een set op **Prompt voor Claude**, plak die prompt in een chat met Claude samen met je foto's, en plak de JSON die je terugkrijgt bij **Importeren**. Pas daarna de aantallen aan.
-3. **Analyse**: drie tabbladen (geen dubbels, max. 2×, max. 5×). Per set zoveel mogelijk bundels, de rest gaat naar random. Kies **Gebruik dit plan**.
-4. **Bundels**: tik **Maak** voor een pakbon met exact welke kaarten erin moeten, plus hoeveel holo/reverse je uit je map neemt. Na **Bundel gemaakt** gaan de kaarten uit de voorraad. Met **Terug** gaan ze er weer in.
-5. **Verkoop**: selecteer gemaakte bundels, registreer platform en bedrag. De app houdt per platform de DAC7-teller bij (30 verkopen of €2.000 per jaar). Bij een verkoop vanaf €25 krijg je een herinnering voor de extra blinkende kaart per bundel.
+1. **Inventaris**: per era en set je gewone kaarten (common/uncommon). Kaarten toevoegen met − / +, of via **Prompt voor Claude** (foto's) en **Importeren**. Kaarten die geen common/uncommon zijn, vraagt de app eerst te bevestigen.
+2. **Instellingen → Tins en Bundels**: per soort het aantal gewone kaarten, holo/reverse en energy, extra's, prijs, bron (willekeurige sets, per set of één set), een optioneel thema (bv. Eevee's) en de tekst van het zoekertje. Standaard alleen-lezen: tik **Bewerken** en daarna **Opslaan**.
+3. **Analyse**: **Analyse starten** vraagt hoeveel tins je hebt. Eerst thema-tins, dan andere tins, dan bundels. Overzicht met opbrengst, en per tin en bundel het aantal.
+4. **Voorbereiding**: **Maak** geeft een pakbon met exact welke kaarten erin moeten, plus wat je erbij legt (holo/reverse, energy, extra's) en de inhoud van het zoekertje. Na **Gemaakt** gaan de kaarten uit de voorraad.
+5. **Te verkopen**: statussen Online (titel en tekst om te kopiëren), Verzonden, Ontvangen en Geld op rekening. Meerdere aanvinken = één verkoop.
+6. **Verkocht**: alle verkopen met per platform de DAC7-teller (30 verkopen of €2.000 per jaar).
 
 ## Importformaat
 
