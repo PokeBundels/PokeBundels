@@ -126,9 +126,31 @@ export function migrateSettings(saved) {
   return out;
 }
 
-/** Tins eerst, daarna bundels; binnen elk soort de volgorde uit de instellingen. */
+/** Thema-tins eerst (die reserveren hun Pokémon), dan de andere tins, dan bundels; binnen elk de volgorde uit de instellingen. */
 export function orderedPacks(packs) {
-  return [...packs.filter((p) => p.kind === 'tin'), ...packs.filter((p) => p.kind !== 'tin')];
+  const themed = (p) => themeOf(p).n > 0;
+  return [
+    ...packs.filter((p) => p.kind === 'tin' && themed(p)),
+    ...packs.filter((p) => p.kind === 'tin' && !themed(p)),
+    ...packs.filter((p) => p.kind !== 'tin' && themed(p)),
+    ...packs.filter((p) => p.kind !== 'tin' && !themed(p)),
+  ];
+}
+
+/** Thema van een tin/bundel: namen (komma-gescheiden) en hoeveel daarvan er in elke tin/bundel moeten. */
+export function themeOf(p) {
+  const names = String(p.themeNames || '').split(',').map((t) => t.trim()).filter(Boolean);
+  const n = names.length ? Math.max(0, Math.round(p.themeN || 0)) : 0;
+  return { names, n };
+}
+
+/** Naam als los woord: "Eevee" vindt ook "Eevee ex", "Zorua" ook "N's Zorua", maar "Mew" niet "Mewtwo". */
+export function nameMatches(cardName, names) {
+  const n = String(cardName || '').toLowerCase();
+  return names.some((q) => {
+    const e = q.trim().toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return e && new RegExp(`(^|[^a-z0-9])${e}($|[^a-z0-9])`, 'i').test(n);
+  });
 }
 
 export const MODES = [
@@ -314,9 +336,29 @@ export function analysePlan(cards, settings, k, setNames = {}) {
     const n = Math.max(0, Math.round(p.cu || 0));
     let cap = p.kind === 'tin' ? Math.max(0, Math.round(p.stock || 0)) : Infinity;
     const sources = p.source === 'perset' ? setIds : [p.source || 'mix'];
+    const theme = themeOf(p);
+    const tn = Math.min(theme.n, n);
     for (const src of sources) {
       const pool = n > 0 ? poolOf(src) : [];
-      const { bundles } = n > 0 && cap > 0 ? allocate(pool, n, k, order, cap) : { bundles: [] };
+      let bundles = [];
+      let themePool = [];
+      let otherPool = pool;
+      if (n > 0 && cap > 0 && tn > 0) {
+        // thema-kaarten apart: elke tin/bundel krijgt er precies tn, de rest komt uit de andere kaarten
+        themePool = pool.filter((c) => nameMatches(byId.get(c.id)?.name, theme.names));
+        const tIds = new Set(themePool.map((c) => c.id));
+        otherPool = pool.filter((c) => !tIds.has(c.id));
+        const counts = (list) => list.map((c) => c.count);
+        const B = Math.min(cap, maxBundles(counts(themePool), tn, k), n - tn > 0 ? maxBundles(counts(otherPool), n - tn, k) : Infinity);
+        if (B > 0) {
+          const a1 = allocate(themePool, tn, k, order, B).bundles;
+          const a2 = n - tn > 0 ? allocate(otherPool, n - tn, k, order, a1.length).bundles : a1.map(() => []);
+          const m = Math.min(a1.length, a2.length);
+          bundles = a1.slice(0, m).map((t, i) => [...t, ...a2[i]]);
+        }
+      } else if (n > 0 && cap > 0) {
+        bundles = allocate(pool, n, k, order, cap).bundles;
+      }
       for (const b of bundles) for (const x of b) remaining.set(x.id, remaining.get(x.id) - x.count);
       if (cap !== Infinity) cap -= bundles.length;
       const setName = src === 'mix' ? '' : (setNames[src] || src);
@@ -324,6 +366,7 @@ export function analysePlan(cards, settings, k, setNames = {}) {
         key: `${p.id}|${src}`, packId: p.id, kind: p.kind, ref: src, name: p.name, setName,
         label: setName ? `${p.name} · ${setName}` : p.name,
         count: bundles.length, bundles, pool, n,
+        themeN: tn, themeNames: theme.names, themePool, otherPool,
         shiny: p.shiny || 0, energy: p.energy || 0, extras: p.extras || '', price: p.price || 0,
         size: n + (p.shiny || 0) + (p.energy || 0),
       });

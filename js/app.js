@@ -6,7 +6,7 @@ import {
   MODES, TEMPLATES, analysePlan, defaultPacks, migrateSettings, parseExtras, isNonShiny, isNonHoloRare, isBundleCard, normNr, parseImport, pickVaried,
 } from './logic.js';
 
-const VERSION = '2.5.3';
+const VERSION = '2.6.0';
 const DAC7 = { sales: 30, revenue: 2000 };
 const PLATFORMS = ['Vinted', '2dehands', 'Anders'];
 
@@ -611,6 +611,8 @@ function compText(p) {
   if (p.shiny) parts.push(`${p.shiny} holo/reverse`);
   if (p.energy) parts.push(`${p.energy} energy`);
   for (const x of parseExtras(p.extras)) parts.push(x.label);
+  const th = String(p.themeNames || '').trim();
+  if (th && (p.themeN || 0) > 0) parts.push(`thema: ${p.themeN}× ${th.split(',').map((t) => t.trim()).filter(Boolean).join('/')}`);
   return parts.join(' + ');
 }
 
@@ -646,7 +648,8 @@ function renderAnalysis() {
           <p class="muted small">${esc(compText(p))} · ${esc(sourceName(p.source))} · ${eur(p.price)} per stuk${kind === 'tin' ? ` · ${p.stock || 0} tins beschikbaar` : ''}</p>
           <ul class="kv"><li><span>Opbrengst</span><b>${eur(n * (p.price || 0))}</b></li></ul>
           ${rows ? `<ul class="kv">${rows}</ul>` : ''}
-          ${kind === 'tin' && n < (p.stock || 0) ? `<p class="small warn">Niet genoeg kaarten voor alle ${p.stock} tins.</p>` : ''}
+          ${kind === 'tin' && n < (p.stock || 0) ? `<p class="small warn">Niet genoeg ${(p.themeN || 0) > 0 && String(p.themeNames || '').trim() ? 'thema-Pokémon of ' : ''}kaarten voor alle ${p.stock} tins.</p>` : ''}
+          ${units.some((u) => u.themeN > 0) ? `<p class="muted small">Thema-Pokémon in voorraad: ${units.reduce((s2, u) => s2 + u.themePool.reduce((t, c) => t + c.count, 0), 0)} kaarten (${units.reduce((s2, u) => s2 + u.themePool.length, 0)} verschillend), worden eerst voor deze ${kind === 'tin' ? 'tins' : 'bundels'} gereserveerd.</p>` : ''}
         </section>`;
     }).join('');
     const tot = a.units.filter((u) => u.kind === kind).reduce((s2, u) => s2 + u.count * u.price, 0);
@@ -800,23 +803,41 @@ function plannedPick(a, unit) {
   for (const b of state.bundles) {
     if (b.status === 'gemaakt' && `${b.packId}|${b.ref}` === unit.key) for (const x of b.cards) avoid.add(x.id);
   }
-  const check = (bundle) => planLoss(a, unit, bundle).length === 0;
+  const idx = cardIndex();
+  // Thema-tin: eerst de thema-Pokémon uit hun eigen pool, daarna de rest uit de andere kaarten.
+  let themeCards = [];
+  let base = unit;
+  if (unit.themeN > 0) {
+    themeCards = pickVaried(unit.themePool, unit.themeN, a.k, unit.count, avoid) || unit.bundles[0].filter((x) => unit.themePool.some((c) => c.id === x.id));
+    base = { ...unit, pool: unit.otherPool, n: unit.n - unit.themeN };
+  }
+  const withTheme = (rest) => [...themeCards, ...(rest || [])];
+  const check = (rest) => planLoss(a, unit, withTheme(rest)).length === 0;
+  const themeIds = new Set(themeCards.map((x) => x.id));
+  const themeList = () => {
+    const m = new Map();
+    for (const x of themeCards) { const nm = idx.get(x.id)?.name || '?'; m.set(nm, (m.get(nm) || 0) + x.count); }
+    return [...m].map(([name, n]) => ({ name, n }));
+  };
   const hasMust = state.must.some((m) => m.name.trim() && m.n > 0);
   if (!hasMust) {
-    const cards = pickVaried(unit.pool, unit.n, a.k, unit.count, avoid, Math.random, check) || unit.bundles[0];
-    return { cards, forcedIds: new Set(), notes: [], loss: [], pokemon: [] };
+    const rest = base.n > 0
+      ? (pickVaried(base.pool, base.n, a.k, unit.count, avoid, Math.random, check) || pickVaried(base.pool, base.n, a.k, 1, avoid))
+      : [];
+    if (rest === null) return { cards: null, forcedIds: themeIds, notes: ['Niet genoeg kaarten om aan te vullen.'], loss: [], pokemon: [] };
+    const cards = withTheme(rest);
+    return { cards, forcedIds: themeIds, notes: [], loss: planLoss(a, unit, cards), pokemon: themeList() };
   }
-  const idx = cardIndex();
-  const { forced, notes, gotList } = forcedPick(unit, a.k, idx, avoid);
+  const { forced, notes, gotList } = forcedPick(base, a.k, idx, avoid);
   const fIds = new Set(forced.map((x) => x.id));
-  const rest = unit.pool.filter((c) => !fIds.has(c.id));
-  const need = unit.n - forced.reduce((s, x) => s + x.count, 0);
+  const rest = base.pool.filter((c) => !fIds.has(c.id));
+  const need = base.n - forced.reduce((s2, x) => s2 + x.count, 0);
   const combine = (fill) => [...forced, ...(fill || [])];
   let fill = need > 0 ? pickVaried(rest, need, a.k, 1, avoid, Math.random, (f) => check(combine(f))) : [];
   if (fill === null) fill = pickVaried(rest, need, a.k, 1, avoid);
-  if (fill === null) return { cards: null, forcedIds: fIds, notes: [...notes, 'Niet genoeg andere kaarten om aan te vullen.'], loss: [] };
-  const cards = combine(fill);
-  return { cards, forcedIds: fIds, notes, loss: planLoss(a, unit, cards), pokemon: gotList };
+  if (fill === null) return { cards: null, forcedIds: new Set([...fIds, ...themeIds]), notes: [...notes, 'Niet genoeg andere kaarten om aan te vullen.'], loss: [] };
+  const cards = withTheme(combine(fill));
+  return { cards, forcedIds: new Set([...fIds, ...themeIds]), notes, loss: planLoss(a, unit, cards), pokemon: [...themeList(), ...gotList] };
 }
 
 function mustHtml(unit, k) {
@@ -858,7 +879,7 @@ function makeSheet(key) {
     .sort((p, q) => (q.forced - p.forced) || (p.setName || '').localeCompare(q.setName || '') || String(p.localId).localeCompare(String(q.localId), undefined, { numeric: true }));
   let lastSet = null;
   const rows = lines.map((c) => {
-    const grp = c.forced ? 'Gekozen Pokémon' : c.setName;
+    const grp = c.forced ? (unit.themeN > 0 ? 'Thema- en gekozen Pokémon' : 'Gekozen Pokémon') : c.setName;
     const head = grp !== lastSet ? `<li class="pick-head">${esc(grp)}</li>` : '';
     lastSet = grp;
     const img = imageUrl(c);
@@ -1199,6 +1220,9 @@ function packEditor(p) {
         </div>
         ${p.kind === 'tin' ? f('stock', 'Beschikbare tins', 'number', 'min="0" inputmode="numeric"') : ''}
         ${f('extras', 'Extra (bv. 1 sticker, 1 coin)', 'text')}
+        <div class="acc-sub">Thema (optioneel)</div>
+        ${f('themeNames', 'Thema-Pokémon, met komma (bv. Eevee, Vaporeon, Jolteon)', 'text')}
+        ${f('themeN', 'Hoeveel daarvan per tin/bundel (bij de gewone kaarten)', 'number', 'min="0" inputmode="numeric"')}
         ${f('title', 'Titel zoekertje', 'text')}
         <label class="field"><span>Tekst zoekertje</span><textarea class="input" rows="10" ${lock} data-pack="${esc(p.id)}" data-pf="text">${esc(p.text || '')}</textarea></label>
         <div class="btn-row">
@@ -1504,7 +1528,7 @@ async function onChange(e) {
     const p = packById(el.dataset.pack);
     if (!p) return;
     const f = el.dataset.pf;
-    if (['name', 'extras', 'title', 'text', 'source'].includes(f)) p[f] = f === 'name' ? (el.value.trim() || p.name) : el.value;
+    if (['name', 'extras', 'title', 'text', 'source', 'themeNames'].includes(f)) p[f] = f === 'name' ? (el.value.trim() || p.name) : el.value;
     else {
       const v = Number(el.value);
       if (!Number.isFinite(v) || v < 0) { toast('Ongeldig getal.'); return; }
