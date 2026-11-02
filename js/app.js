@@ -6,15 +6,29 @@ import {
   MODES, TEMPLATES, analysePlan, defaultPacks, migrateSettings, parseExtras, isNonShiny, isNonHoloRare, isBundleCard, normNr, parseImport, pickVaried,
 } from './logic.js';
 
-const VERSION = '2.5.0';
+const VERSION = '2.5.1';
 const DAC7 = { sales: 30, revenue: 2000 };
 const PLATFORMS = ['Vinted', '2dehands', 'Anders'];
 
-function loadOpenEras() {
-  try { return new Set(JSON.parse(localStorage.getItem('pb-open-eras') || '[]')); } catch { return new Set(); }
+// Waar je zat in de app (scherm, tabbladen, open groepen, scrollpositie).
+// Android sluit een geminimaliseerde app soms af; kom je binnen 30 minuten terug, dan open je op dezelfde plek.
+// Later opnieuw openen = beginscherm met alle era's dichtgeklapt.
+const UI_KEY = 'pb-ui';
+const UI_MAX_AGE = 30 * 60 * 1000;
+function loadUi() {
+  try {
+    const u = JSON.parse(localStorage.getItem(UI_KEY) || 'null');
+    if (!u || Date.now() - u.at > UI_MAX_AGE) return null;
+    return u;
+  } catch { return null; }
 }
-function saveOpenEras() {
-  try { localStorage.setItem('pb-open-eras', JSON.stringify([...state.openEras])); } catch { /* geen opslag */ }
+function saveUi() {
+  try {
+    localStorage.setItem(UI_KEY, JSON.stringify({
+      at: Date.now(), view: state.view, sub: state.sub, invSet: state.invSet,
+      openEras: [...state.openEras], openAcc: state.openAcc, openPack: state.openPack, scroll: window.scrollY,
+    }));
+  } catch { /* geen opslag */ }
 }
 
 const state = {
@@ -36,7 +50,7 @@ const state = {
   makeName: '',       // eigen naam voor deze tin/bundel bij Maak
   editSec: null,      // blok in Instellingen dat bewerkt wordt
   editSnap: null,     // instellingen van voor het bewerken (voor Annuleren)
-  openEras: loadOpenEras(), // opengeklapte era's in Inventaris
+  openEras: new Set(), // opengeklapte era's in Inventaris
   invVersion: 0,
   analysisCache: {},
 };
@@ -219,6 +233,7 @@ function render() {
   const views = { inv: renderInventory, ana: renderAnalysis, prep: renderPrep, sell: renderSell, sale: renderSales, set: renderSettings };
   main.innerHTML = views[state.view]();
   navSync();
+  saveUi();
 }
 
 // ----- Inventaris -----
@@ -1495,7 +1510,21 @@ async function start() {
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#sheet').hidden) closeSheet(); });
   await load();
   persist();
+  const ui = loadUi();
+  if (ui) {
+    if (['inv', 'ana', 'prep', 'sell', 'sale', 'set'].includes(ui.view)) state.view = ui.view;
+    state.sub = { ...state.sub, ...(ui.sub || {}) };
+    state.invSet = ui.invSet && state.sets[ui.invSet] ? ui.invSet : null;
+    state.openEras = new Set(ui.openEras || []);
+    state.openAcc = ui.openAcc || null;
+    state.openPack = ui.openPack || null;
+  }
   render();
+  if (ui?.scroll) requestAnimationFrame(() => window.scrollTo(0, ui.scroll));
+  let scrollT = null;
+  window.addEventListener('scroll', () => { clearTimeout(scrollT); scrollT = setTimeout(saveUi, 300); }, { passive: true });
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveUi(); });
+  window.addEventListener('pagehide', saveUi);
   if (!state.setList.length) {
     listSets().then((l) => { state.setList = l; if (state.view === 'set' || state.view === 'inv') render(); }).catch(() => {});
   }
@@ -1505,11 +1534,12 @@ async function start() {
     const d = e.target;
     if (d.dataset?.packOpen) {
       if (d.open) state.openPack = d.dataset.packOpen; else if (state.openPack === d.dataset.packOpen) state.openPack = null;
+      saveUi();
       return;
     }
     if (d.dataset?.era) {
       if (d.open) state.openEras.add(d.dataset.era); else state.openEras.delete(d.dataset.era);
-      saveOpenEras();
+      saveUi();
       return;
     }
     if (!d.dataset?.acc) return;
@@ -1518,6 +1548,7 @@ async function start() {
       document.querySelectorAll(`details[data-acc="${d.dataset.acc}"][open]`).forEach((x) => { if (x !== d) x.open = false; });
       setTimeout(() => { const r = d.getBoundingClientRect(); if (r.top < 0) window.scrollBy(0, r.top - 8); }, 0);
     } else if (state.openAcc === d.dataset.id) state.openAcc = null;
+    saveUi();
   }, true);
   setupSW();
 }
