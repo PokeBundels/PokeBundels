@@ -6,7 +6,7 @@ import {
   MODES, TEMPLATES, analysePlan, defaultPacks, migrateSettings, parseExtras, isNonShiny, isNonHoloRare, isBundleCard, normNr, parseImport, pickVaried,
 } from './logic.js';
 
-const VERSION = '2.4.0';
+const VERSION = '2.4.1';
 const DAC7 = { sales: 30, revenue: 2000 };
 const PLATFORMS = ['Vinted', '2dehands', 'Anders'];
 
@@ -305,6 +305,10 @@ function renderSetDetail(setId) {
         <p class="muted small" id="set-stats">${esc(set.id)} · ${t} kaarten · ${u} verschillend</p>
       </div>
     </header>
+    <div class="btn-row set-tools">
+      <button class="btn ghost small" data-action="refresh-set" data-set="${esc(set.id)}">${icon('refresh', 16)} Setgegevens vernieuwen</button>
+      <button class="btn ghost small danger" data-action="remove-set" data-set="${esc(set.id)}">Set uit inventaris halen</button>
+    </div>
     <div class="toolbar">
       <input type="search" class="input" placeholder="Zoek naam of nummer" value="${esc(f.q)}" data-input="inv-q" aria-label="Zoek kaart">
       <div class="chips">
@@ -318,10 +322,7 @@ function renderSetDetail(setId) {
       <button class="btn small" data-action="import">${icon('up', 16)} Importeren</button>
     </div>
     <div class="grid">${tiles || '<div class="empty">Geen kaarten met deze filter.</div>'}</div>
-    <div class="danger-zone">
-      <button class="btn ghost small" data-action="refresh-set" data-set="${esc(set.id)}">${icon('refresh', 16)} Setgegevens vernieuwen</button>
-      <button class="btn ghost small danger" data-action="remove-set" data-set="${esc(set.id)}">Set uit inventaris halen</button>
-    </div>`;
+`;
 }
 
 function tileHtml(c) {

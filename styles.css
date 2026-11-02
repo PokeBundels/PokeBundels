@@ -311,3 +311,5 @@ details.must > summary { cursor: pointer; font-weight: 700; min-height: 32px; di
 .must-row { display: grid; grid-template-columns: minmax(0, 1fr) 72px auto; gap: 8px; align-items: center; margin-top: 8px; }
 .must-info { margin: 2px 0 4px; }
 .warnbox { border-color: #e0a100; flex-direction: column; gap: 4px; }
+
+.set-tools { margin-top: 0; }
