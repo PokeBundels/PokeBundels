@@ -3,10 +3,10 @@
 import { db, persist } from './db.js';
 import { listSets, getSet, imageUrl, fillReleaseDates } from './tcgdex.js';
 import {
-  MODES, TEMPLATES, analysePlan, defaultPacks, migrateSettings, parseExtras, isNonShiny, isNonHoloRare, isBundleCard, normNr, parseImport, pickVaried,
+  MODES, TEMPLATES, analysePlan, themeOf, nameMatches, defaultPacks, migrateSettings, parseExtras, isNonShiny, isNonHoloRare, isBundleCard, normNr, parseImport, pickVaried,
 } from './logic.js';
 
-const VERSION = '2.6.0';
+const VERSION = '2.7.0';
 const DAC7 = { sales: 30, revenue: 2000 };
 const PLATFORMS = ['Vinted', '2dehands', 'Anders'];
 
@@ -138,6 +138,7 @@ function closeSheet() {
   root.innerHTML = '';
   document.body.classList.remove('noscroll');
   navSync();
+  if (state.rerenderOnClose) { state.rerenderOnClose = false; render(); }
 }
 
 // ---------- terugknop van de telefoon: stap terug in plaats van afsluiten ----------
@@ -648,7 +649,8 @@ function renderAnalysis() {
           <p class="muted small">${esc(compText(p))} · ${esc(sourceName(p.source))} · ${eur(p.price)} per stuk${kind === 'tin' ? ` · ${p.stock || 0} tins beschikbaar` : ''}</p>
           <ul class="kv"><li><span>Opbrengst</span><b>${eur(n * (p.price || 0))}</b></li></ul>
           ${rows ? `<ul class="kv">${rows}</ul>` : ''}
-          ${kind === 'tin' && n < (p.stock || 0) ? `<p class="small warn">Niet genoeg ${(p.themeN || 0) > 0 && String(p.themeNames || '').trim() ? 'thema-Pokémon of ' : ''}kaarten voor alle ${p.stock} tins.</p>` : ''}
+          ${kind === 'tin' && n < (p.stock || 0) ? `<p class="small warn">Niet genoeg ${themeOf(p).n ? 'thema-Pokémon of ' : ''}kaarten voor alle ${p.stock} tins.</p>` : ''}
+          ${themeOf(p).n && (kind !== 'tin' || n < (p.stock || 0)) ? `<div class="btn-row"><button class="btn small" data-action="theme-add" data-pack="${esc(p.id)}">${icon('plus', 16)} Thema-kaarten toevoegen</button></div>` : ''}
           ${units.some((u) => u.themeN > 0) ? `<p class="muted small">Thema-Pokémon in voorraad: ${units.reduce((s2, u) => s2 + u.themePool.reduce((t, c) => t + c.count, 0), 0)} kaarten (${units.reduce((s2, u) => s2 + u.themePool.length, 0)} verschillend), worden eerst voor deze ${kind === 'tin' ? 'tins' : 'bundels'} gereserveerd.</p>` : ''}
         </section>`;
     }).join('');
@@ -838,6 +840,44 @@ function plannedPick(a, unit) {
   if (fill === null) return { cards: null, forcedIds: new Set([...fIds, ...themeIds]), notes: [...notes, 'Niet genoeg andere kaarten om aan te vullen.'], loss: [] };
   const cards = withTheme(combine(fill));
   return { cards, forcedIds: new Set([...fIds, ...themeIds]), notes, loss: planLoss(a, unit, cards), pokemon: [...themeList(), ...gotList] };
+}
+
+// Thema-kaarten toevoegen die je nog apart had liggen: alle kaarten met die namen uit je sets, met + en −.
+function themeAddSheet(packId) {
+  const p = packById(packId);
+  if (!p) return;
+  const th = themeOf(p);
+  const list = [];
+  for (const s of Object.values(state.sets)) {
+    for (const c of s.cards) if (nameMatches(c.name, th.names)) list.push({ ...c, setId: s.id, setName: s.name });
+  }
+  list.sort((x, y) => (x.setName || '').localeCompare(y.setName || '') || String(x.localId).localeCompare(String(y.localId), undefined, { numeric: true }));
+  let last = null;
+  const grid = list.map((c) => {
+    const head = c.setName !== last ? `<div class="theme-head">${esc(c.setName)}</div>` : '';
+    last = c.setName;
+    return head + tileHtml(c);
+  }).join('');
+  state.rerenderOnClose = true;
+  openSheet(`
+    <h2>Thema-kaarten toevoegen</h2>
+    <p class="muted small">${esc(th.names.join(', '))} uit de sets in je inventaris. Tik + voor elke kaart die je nog apart had liggen; ze gaan meteen in je voorraad.</p>
+    <div class="grid theme-grid">${grid || '<div class="empty">Geen kaarten met deze namen in je sets.</div>'}</div>
+    <div class="callout"><span>Kaarten uit sets die nog niet in je inventaris staan (bv. 151 of oudere sets)? Kopieer de prompt, stuur foto's naar Claude en importeer het bestand. Nieuwe sets worden dan automatisch toegevoegd.</span></div>
+    <div class="btn-row">
+      <button class="btn small" data-action="copy-mixed-prompt" data-pack="${esc(packId)}">${icon('copy', 16)} Prompt voor Claude (gemengde sets)</button>
+      <button class="btn small" data-action="import">${icon('up', 16)} Importeren</button>
+    </div>
+    <div class="btn-row sticky-actions"><button class="btn primary" data-action="close-sheet">${icon('check', 18)} Klaar</button></div>`);
+}
+
+function mixedPrompt(p) {
+  const th = themeOf(p);
+  return `Ik stuur je foto's van Pokémon-kaarten (Engels) uit verschillende sets${th.names.length ? ` (vooral ${th.names.join(', ')})` : ''}. ` +
+    `Herken per kaart de set (setcode en symbool onderaan), het kaartnummer (bv. 012/191) en de naam. Tel elke kaart die je ziet als 1. ` +
+    `Geef me daarna enkel een JSON-bestand voor mijn PokeBundels-app in exact dit formaat, met per kaart het TCGdex set-ID:\n\n` +
+    `{"app":"PokeBundels","mode":"add","cards":[{"setId":"sv03.5","localId":"133","name":"Eevee","count":1}]}\n\n` +
+    `Twijfel je over een kaart of set, vermeld die dan apart onder de JSON zodat ik ze zelf kan nakijken.`;
 }
 
 function mustHtml(unit, k) {
@@ -1453,6 +1493,13 @@ async function onClick(e) {
       break;
     }
     case 'edit-cancel': restoreEdit(); render(); break;
+    case 'theme-add': themeAddSheet(el.dataset.pack); break;
+    case 'copy-mixed-prompt': {
+      const txt = mixedPrompt(packById(el.dataset.pack) || {});
+      try { await navigator.clipboard.writeText(txt); toast('Prompt gekopieerd.'); }
+      catch { openSheet(`<h2>Prompt voor Claude</h2><textarea class="input mono" rows="10" readonly>${esc(txt)}</textarea>`); }
+      break;
+    }
     case 'pack-preview': {
       const pk = packById(el.dataset.pack);
       const setId = pk.source === 'mix' ? '' : pk.source === 'perset' ? (state.settings.mySets[0] || '') : pk.source;

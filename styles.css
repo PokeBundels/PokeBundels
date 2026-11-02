@@ -318,3 +318,7 @@ details.must > summary { cursor: pointer; font-weight: 700; min-height: 32px; di
 .locked .input[readonly], .locked select:disabled, #main .input[readonly]:not(#lt-0):not(#ld-0) { opacity: 0.75; }
 .edit-bar { margin: 8px 0; }
 .pack-b.editing { border-left: 3px solid var(--accent); }
+
+/* Thema-kaarten toevoegen */
+.theme-grid { margin: 8px 0; }
+.theme-head { grid-column: 1 / -1; font-weight: 700; margin-top: 8px; }
