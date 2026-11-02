@@ -6,7 +6,7 @@ import {
   MODES, TEMPLATES, analysePlan, defaultPacks, migrateSettings, parseExtras, isNonShiny, isNonHoloRare, isBundleCard, normNr, parseImport, pickVaried,
 } from './logic.js';
 
-const VERSION = '2.4.1';
+const VERSION = '2.5.0';
 const DAC7 = { sales: 30, revenue: 2000 };
 const PLATFORMS = ['Vinted', '2dehands', 'Anders'];
 
@@ -34,6 +34,8 @@ const state = {
   openPack: null,     // opengeklapte tin/bundel in Instellingen
   must: [],           // specifieke Pokémon bij Maak: [{name, n}]
   makeName: '',       // eigen naam voor deze tin/bundel bij Maak
+  editSec: null,      // blok in Instellingen dat bewerkt wordt
+  editSnap: null,     // instellingen van voor het bewerken (voor Annuleren)
   openEras: loadOpenEras(), // opengeklapte era's in Inventaris
   invVersion: 0,
   analysisCache: {},
@@ -198,6 +200,7 @@ const ICONS = {
   copy: '<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>',
   refresh: '<path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/>',
   check: '<path d="M5 12l5 5 9-10"/>',
+  edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M14 6l4 4"/>',
   spark: '<path d="M12 2c.6 5.4 2.6 7.4 8 8-5.4.6-7.4 2.6-8 8-.6-5.4-2.6-7.4-8-8 5.4-.6 7.4-2.6 8-8z"/>',
 };
 const icon = (name, size = 22) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name]}</svg>`;
@@ -1120,17 +1123,37 @@ async function undoSale(id) {
 
 // ----- Instellingen -----
 
+function restoreEdit() {
+  if (state.editSnap) state.settings = state.editSnap;
+  state.editSec = null; state.editSnap = null;
+  state.analysisCache = {};
+}
+
+// Bewerken / Opslaan / Annuleren voor een blok in Instellingen
+function editBar(id) {
+  if (state.editSec === id) {
+    return `<div class="btn-row edit-bar">
+      <button class="btn primary small" data-action="edit-save" data-sec="${esc(id)}">${icon('check', 16)} Opslaan</button>
+      <button class="btn small" data-action="edit-cancel">Annuleren</button>
+    </div>`;
+  }
+  return `<div class="btn-row edit-bar"><button class="btn small" data-action="edit-start" data-sec="${esc(id)}">${icon('edit', 16)} Bewerken</button></div>`;
+}
+
 function packEditor(p) {
   const sets = state.settings.mySets.map((id) => [id, setName(id)]).sort((x, y) => x[1].localeCompare(y[1]));
   const src = [['mix', 'Alle sets gemengd'], ['perset', 'Per set (apart per set)'], ...sets]
     .map(([v, l]) => `<option value="${esc(v)}" ${p.source === v ? 'selected' : ''}>${esc(l)}</option>`).join('');
-  const f = (field, label, type = 'number', extra = '') => `<label class="field"><span>${label}</span><input class="input" type="${type}" ${extra} value="${esc(p[field] ?? '')}" data-pack="${esc(p.id)}" data-pf="${field}"></label>`;
+  const ed = state.editSec === `pack:${p.id}`;
+  const lock = ed ? '' : 'readonly';
+  const f = (field, label, type = 'number', extra = '') => `<label class="field"><span>${label}</span><input class="input" type="${type}" ${extra} ${lock} value="${esc(p[field] ?? '')}" data-pack="${esc(p.id)}" data-pf="${field}"></label>`;
   return `
     <details class="pack" data-pack-open="${esc(p.id)}" ${state.openPack === p.id ? 'open' : ''}>
       <summary><span class="acc-t">${esc(p.name)}</span><span class="acc-s">${esc(compText(p))} · ${eur(p.price)}</span></summary>
-      <div class="pack-b">
+      <div class="pack-b ${ed ? 'editing' : 'locked'}">
+        ${editBar(`pack:${p.id}`)}
         ${f('name', 'Naam', 'text')}
-        <label class="field"><span>Kaarten uit</span><select class="input" data-pack="${esc(p.id)}" data-pf="source">${src}</select></label>
+        <label class="field"><span>Kaarten uit</span><select class="input" ${ed ? '' : 'disabled'} data-pack="${esc(p.id)}" data-pf="source">${src}</select></label>
         <div class="four">
           ${f('cu', 'Gewoon', 'number', 'min="0" inputmode="numeric"')}
           ${f('shiny', 'Holo/rev.', 'number', 'min="0" inputmode="numeric"')}
@@ -1140,16 +1163,17 @@ function packEditor(p) {
         ${p.kind === 'tin' ? f('stock', 'Beschikbare tins', 'number', 'min="0" inputmode="numeric"') : ''}
         ${f('extras', 'Extra (bv. 1 sticker, 1 coin)', 'text')}
         ${f('title', 'Titel zoekertje', 'text')}
-        <label class="field"><span>Tekst zoekertje</span><textarea class="input" rows="10" data-pack="${esc(p.id)}" data-pf="text">${esc(p.text || '')}</textarea></label>
+        <label class="field"><span>Tekst zoekertje</span><textarea class="input" rows="10" ${lock} data-pack="${esc(p.id)}" data-pf="text">${esc(p.text || '')}</textarea></label>
         <div class="btn-row">
           <button class="btn small" data-action="pack-preview" data-pack="${esc(p.id)}">${icon('copy', 16)} Voorbeeld en kopiëren</button>
         </div>
         <div class="btn-row">
           <button class="btn small" data-action="pack-move" data-pack="${esc(p.id)}" data-dir="-1">Omhoog</button>
           <button class="btn small" data-action="pack-move" data-pack="${esc(p.id)}" data-dir="1">Omlaag</button>
-          <button class="btn small" data-action="pack-reset-text" data-pack="${esc(p.id)}">Standaardtekst</button>
-          <button class="btn ghost small danger" data-action="pack-remove" data-pack="${esc(p.id)}">Verwijderen</button>
+          ${ed ? `<button class="btn small" data-action="pack-reset-text" data-pack="${esc(p.id)}">Standaardtekst</button>
+          <button class="btn ghost small danger" data-action="pack-remove" data-pack="${esc(p.id)}">Verwijderen</button>` : ''}
         </div>
+        ${ed ? editBar(`pack:${p.id}`) : ''}
       </div>
     </details>`;
 }
@@ -1177,8 +1201,10 @@ function renderSettings() {
     ${acc('tins', 'Tins', `${tinPacks().length} soorten · ${tinPacks().reduce((n, p) => n + (p.stock || 0), 0)} beschikbaar`, packList('tin'))}
     ${acc('bundles', 'Bundels', `${bundlePacks().length} soorten`, packList('bundle'))}
     ${acc('listing', 'Zoekertjes', `#${esc(S.hashtag || '')}`, `
-      <label class="field"><span>Eigen hashtag (zonder #)</span><input class="input" value="${esc(S.hashtag || '')}" data-text-setting="hashtag"></label>
-      <label class="field"><span>Zoekwoorden onderaan</span><textarea class="input" rows="4" data-text-setting="keywords">${esc(S.keywords || '')}</textarea></label>
+      ${editBar('listing')}
+      <label class="field"><span>Eigen hashtag (zonder #)</span><input class="input" ${state.editSec === 'listing' ? '' : 'readonly'} value="${esc(S.hashtag || '')}" data-text-setting="hashtag"></label>
+      <label class="field"><span>Zoekwoorden onderaan</span><textarea class="input" rows="4" ${state.editSec === 'listing' ? '' : 'readonly'} data-text-setting="keywords">${esc(S.keywords || '')}</textarea></label>
+      ${state.editSec === 'listing' ? editBar('listing') : ''}
       <p class="muted small">Invulvelden in de teksten van tins en bundels: {naam} (naam bij Maak) {pokemon} (gekozen Pokémon) {kaarten} {cu} (gewoon + energy) {holo} {energy} {extras} {set} {prijs} {hashtag} {hashtagsoort} {hashtagset} {zoekwoorden}. De app vult ze automatisch in; je hoeft niets manueel te vervangen. Een regel waarin een invulveld leeg of 0 is, valt weg.</p>`)}
     ${acc('backup', 'Back-up', 'alles staat enkel op dit toestel', `
       <p class="muted small">Maak geregeld een back-up: zo raak je je voorraad, bundels en verkopen niet kwijt.</p>
@@ -1330,7 +1356,9 @@ async function onClick(e) {
       const at = kind === 'tin' ? state.settings.packs.filter((x) => x.kind === 'tin').length : state.settings.packs.length;
       state.settings.packs.splice(at, 0, p);
       state.openPack = p.id; state.openAcc = kind === 'tin' ? 'tins' : 'bundles';
-      await save.settings(); render(); break;
+      await save.settings();
+      state.editSec = `pack:${p.id}`; state.editSnap = structuredClone(state.settings);
+      render(); break;
     }
     case 'pack-move': {
       const list = state.settings.packs;
@@ -1349,6 +1377,21 @@ async function onClick(e) {
       if (b) { delete b.listing; await save.bundles(); stepSheet(el.dataset.id, 'online'); }
       break;
     }
+    case 'edit-start':
+      if (state.editSec) restoreEdit();
+      state.editSec = el.dataset.sec;
+      state.editSnap = structuredClone(state.settings);
+      render(); break;
+    case 'edit-save': {
+      // velden in dit blok nog eens uitlezen (voor het geval 'change' nog niet afging)
+      for (const inp of document.querySelectorAll('[data-pf], [data-text-setting]')) await onChange({ target: inp });
+      state.editSec = null; state.editSnap = null;
+      state.analysisCache = {};
+      await save.settings();
+      render(); toast('Opgeslagen.');
+      break;
+    }
+    case 'edit-cancel': restoreEdit(); render(); break;
     case 'pack-preview': {
       const pk = packById(el.dataset.pack);
       const setId = pk.source === 'mix' ? '' : pk.source === 'perset' ? (state.settings.mySets[0] || '') : pk.source;
@@ -1370,12 +1413,14 @@ async function onClick(e) {
       const kind = p.kind === 'tin' ? 'tin' : 'bundle';
       p.title = TEMPLATES[`${kind}Title`]; p.text = TEMPLATES[`${kind}Text`];
       state.openPack = p.id;
-      await save.settings(); render(); toast('Standaardtekst teruggezet.'); break;
+      render(); toast('Standaardtekst ingevuld. Tik op Opslaan om te bewaren.'); break;
     }
     case 'pack-remove': {
       const p = packById(el.dataset.pack);
       if (!p || !confirm(`"${p.name}" verwijderen? Al gemaakte tins/bundels blijven bestaan.`)) break;
       state.settings.packs = state.settings.packs.filter((x) => x !== p);
+      if (state.editSnap) state.editSnap.packs = state.editSnap.packs.filter((x) => x.id !== p.id);
+      state.editSec = null; state.editSnap = null;
       await save.settings(); render(); break;
     }
     case 'undo-sale': await undoSale(el.dataset.id); break;
@@ -1428,12 +1473,9 @@ async function onChange(e) {
       if (!Number.isFinite(v) || v < 0) { toast('Ongeldig getal.'); return; }
       p[f] = f === 'price' ? v : Math.round(v);
     }
-    state.analysisCache = {};
-    await save.settings();
   }
   if (el.dataset.textSetting) {
     state.settings[el.dataset.textSetting] = el.dataset.textSetting === 'hashtag' ? el.value.replace(/[#\s]/g, '') : el.value;
-    await save.settings();
   }
   if (el.dataset.setting) {
     const v = Number(el.value);

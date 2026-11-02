@@ -313,3 +313,8 @@ details.must > summary { cursor: pointer; font-weight: 700; min-height: 32px; di
 .warnbox { border-color: #e0a100; flex-direction: column; gap: 4px; }
 
 .set-tools { margin-top: 0; }
+
+/* Instellingen: alleen-lezen tot Bewerken */
+.locked .input[readonly], .locked select:disabled, #main .input[readonly]:not(#lt-0):not(#ld-0) { opacity: 0.75; }
+.edit-bar { margin: 8px 0; }
+.pack-b.editing { border-left: 3px solid var(--accent); }
