@@ -6,7 +6,7 @@ import {
   MODES, TEMPLATES, analysePlan, themeOf, nameMatches, defaultPacks, migrateSettings, parseExtras, isNonShiny, isNonHoloRare, isBundleCard, normNr, parseImport, pickVaried,
 } from './logic.js';
 
-const VERSION = '2.7.1';
+const VERSION = '2.8.0';
 const DAC7 = { sales: 30, revenue: 2000 };
 const PLATFORMS = ['Vinted', '2dehands', 'Anders'];
 
@@ -46,8 +46,6 @@ const state = {
   openAcc: null,      // open groep in Instellingen
   sub: { ana: 'overzicht', prep: 'tins' }, // subtabbladen
   openPack: null,     // opengeklapte tin/bundel in Instellingen
-  must: [],           // specifieke Pokémon bij Maak: [{name, n}]
-  makeName: '',       // eigen naam voor deze tin/bundel bij Maak
   editSec: null,      // blok in Instellingen dat bewerkt wordt
   editSnap: null,     // instellingen van voor het bewerken (voor Annuleren)
   openEras: new Set(), // opengeklapte era's in Inventaris
@@ -763,43 +761,6 @@ function planLoss(a, unit, bundle) {
     .filter((x) => x.n > 0);
 }
 
-// Kaarten in de pool van deze tin/bundel met die naam als los woord: "Eevee" vindt ook "Eevee ex",
-// "Zorua" ook "N's Zorua", maar "Mew" niet "Mewtwo".
-function mustMatches(unit, name, idx) {
-  const q = name.trim().toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  if (!q) return [];
-  const re = new RegExp(`(^|[^a-z0-9])${q}($|[^a-z0-9])`, 'i');
-  return unit.pool.filter((c) => c.count > 0 && re.test(idx.get(c.id)?.name || ''));
-}
-
-// Gekozen Pokémon eerst; wat niet kan, wordt gemeld.
-function forcedPick(unit, k, idx, avoid) {
-  const used = new Map();
-  const notes = [];
-  const gotList = [];
-  let room = unit.n;
-  for (const m of state.must) {
-    const want = Math.max(0, Math.round(m.n || 0));
-    if (!m.name.trim() || !want) continue;
-    const matches = mustMatches(unit, m.name, idx)
-      .map((c) => ({ ...c, free: Math.min(c.count, k) - (used.get(c.id) || 0), r: Math.random() + (avoid.has(c.id) ? 1 : 0) }))
-      .filter((c) => c.free > 0)
-      .sort((x, y) => x.r - y.r);
-    let got = 0;
-    for (let round = 0; got < want && room > 0 && matches.some((c) => c.free > 0); round++) {
-      for (const c of matches) {
-        if (got >= want || room <= 0) break;
-        if (c.free <= 0) continue;
-        used.set(c.id, (used.get(c.id) || 0) + 1);
-        c.free--; got++; room--;
-      }
-    }
-    if (got < want) notes.push(`${m.name}: maar ${got} van ${want} mogelijk`);
-    if (got) gotList.push({ name: m.name.trim(), n: got });
-  }
-  return { forced: [...used].map(([id, count]) => ({ id, count })), notes, gotList };
-}
-
 function plannedPick(a, unit) {
   const avoid = new Set();
   for (const b of state.bundles) {
@@ -821,25 +782,12 @@ function plannedPick(a, unit) {
     for (const x of themeCards) { const nm = idx.get(x.id)?.name || '?'; m.set(nm, (m.get(nm) || 0) + x.count); }
     return [...m].map(([name, n]) => ({ name, n }));
   };
-  const hasMust = state.must.some((m) => m.name.trim() && m.n > 0);
-  if (!hasMust) {
-    const rest = base.n > 0
-      ? (pickVaried(base.pool, base.n, a.k, unit.count, avoid, Math.random, check) || pickVaried(base.pool, base.n, a.k, 1, avoid))
-      : [];
-    if (rest === null) return { cards: null, forcedIds: themeIds, notes: ['Niet genoeg kaarten om aan te vullen.'], loss: [], pokemon: [] };
-    const cards = withTheme(rest);
-    return { cards, forcedIds: themeIds, notes: [], loss: planLoss(a, unit, cards), pokemon: themeList() };
-  }
-  const { forced, notes, gotList } = forcedPick(base, a.k, idx, avoid);
-  const fIds = new Set(forced.map((x) => x.id));
-  const rest = base.pool.filter((c) => !fIds.has(c.id));
-  const need = base.n - forced.reduce((s2, x) => s2 + x.count, 0);
-  const combine = (fill) => [...forced, ...(fill || [])];
-  let fill = need > 0 ? pickVaried(rest, need, a.k, 1, avoid, Math.random, (f) => check(combine(f))) : [];
-  if (fill === null) fill = pickVaried(rest, need, a.k, 1, avoid);
-  if (fill === null) return { cards: null, forcedIds: new Set([...fIds, ...themeIds]), notes: [...notes, 'Niet genoeg andere kaarten om aan te vullen.'], loss: [] };
-  const cards = withTheme(combine(fill));
-  return { cards, forcedIds: new Set([...fIds, ...themeIds]), notes, loss: planLoss(a, unit, cards), pokemon: [...themeList(), ...gotList] };
+  const rest = base.n > 0
+    ? (pickVaried(base.pool, base.n, a.k, unit.count, avoid, Math.random, check) || pickVaried(base.pool, base.n, a.k, 1, avoid))
+    : [];
+  if (rest === null) return { cards: null, forcedIds: themeIds, notes: ['Niet genoeg kaarten om aan te vullen.'], loss: [], pokemon: [] };
+  const cards = withTheme(rest);
+  return { cards, forcedIds: themeIds, notes: [], loss: planLoss(a, unit, cards), pokemon: themeList() };
 }
 
 // Thema-kaarten toevoegen die je nog apart had liggen: alle kaarten met die namen uit je sets, met + en −.
@@ -880,33 +828,6 @@ function mixedPrompt(p) {
     `Twijfel je over een kaart of set, vermeld die dan apart onder de JSON zodat ik ze zelf kan nakijken.`;
 }
 
-function mustHtml(unit, k) {
-  const idx = cardIndex();
-  const rows = state.must.map((m, i) => {
-    const matches = mustMatches(unit, m.name, idx);
-    const max = matches.reduce((s, c) => s + Math.min(c.count, k), 0);
-    const sets = new Set(matches.map((c) => idx.get(c.id)?.setId)).size;
-    const info = m.name.trim() ? (matches.length ? `${matches.length} verschillende in ${sets} set${sets === 1 ? '' : 's'}, max ${max} in deze ${unit.kind === 'tin' ? 'tin' : 'bundel'}` : 'niet gevonden in de kaarten voor deze tin/bundel') : '';
-    return `
-      <div class="must-row">
-        <input class="input" placeholder="Naam, bv. Eevee" value="${esc(m.name)}" data-must="${i}" data-must-field="name" aria-label="Naam Pokémon">
-        <input class="input" type="number" min="1" inputmode="numeric" value="${m.n}" data-must="${i}" data-must-field="n" aria-label="Aantal">
-        <button class="icon-btn" data-action="must-remove" data-i="${i}" aria-label="Verwijderen">${icon('minus', 18)}</button>
-      </div>
-      ${info ? `<div class="muted small must-info">${esc(info)}</div>` : ''}`;
-  }).join('');
-  return `
-    <details class="must" ${state.must.length ? 'open' : ''}>
-      <summary>Specifieke Pokémon${state.must.length ? ` (${state.must.length})` : ''}</summary>
-      <p class="muted small">Namen die zeker in deze ${unit.kind === 'tin' ? 'tin' : 'bundel'} moeten, bv. voor een thema. De rest wordt aangevuld.</p>
-      ${rows}
-      <div class="btn-row">
-        <button class="btn small" data-action="must-add" data-key="${esc(unit.key)}">${icon('plus', 16)} Pokémon</button>
-        <button class="btn small primary" data-action="make" data-key="${esc(unit.key)}" data-keep="1">Toepassen</button>
-      </div>
-    </details>`;
-}
-
 function makeSheet(key) {
   const a = getAnalysis(state.settings.activeMode);
   const unit = a.units.find((u) => u.key === key);
@@ -919,7 +840,7 @@ function makeSheet(key) {
     .sort((p, q) => (q.forced - p.forced) || (p.setName || '').localeCompare(q.setName || '') || String(p.localId).localeCompare(String(q.localId), undefined, { numeric: true }));
   let lastSet = null;
   const rows = lines.map((c) => {
-    const grp = c.forced ? (unit.themeN > 0 ? 'Thema- en gekozen Pokémon' : 'Gekozen Pokémon') : c.setName;
+    const grp = c.forced ? 'Thema-Pokémon' : c.setName;
     const head = grp !== lastSet ? `<li class="pick-head">${esc(grp)}</li>` : '';
     lastSet = grp;
     const img = imageUrl(c);
@@ -935,6 +856,12 @@ function makeSheet(key) {
   if (unit.energy) todo.push(`<b>${unit.energy} energy</b>`);
   for (const x of parseExtras(unit.extras)) todo.push(`<b>${esc(x.label)}</b>`);
   const pack = unit.kind === 'tin' ? ` en steek alles in de <b>${esc(unit.name)}</b>` : '';
+  // inhoud van het zoekertje (eerste blok tekst), zodat je ziet welke holo's/extra's erin moeten
+  const listingPreview = pick.cards ? listingFor({
+    packId: unit.packId, type: unit.kind, name: unit.name, label: unit.label, ref: unit.ref, setName: unit.setName,
+    size: unit.size, cu: unit.n, shiny: unit.shiny, energy: unit.energy, extras: unit.extras, price: unit.price,
+    cards: b, pokemon: pick.pokemon,
+  }).text.split(/\n\s*\n/)[0] : '';
   const warn = [
     ...pick.notes.map(esc),
     ...pick.loss.map((x) => `Hierdoor kun je ${x.n} ${esc(x.label)} minder maken.`),
@@ -943,10 +870,7 @@ function makeSheet(key) {
     <h2>${esc(unit.label)}</h2>
     <p class="muted small">${unit.size} kaarten: ${unit.n} gewoon (hieronder)${unit.energy ? ` + ${unit.energy} energy` : ''}${unit.shiny ? ` + ${unit.shiny} holo/reverse` : ''} · ${eur(unit.price)}</p>
     ${todo.length || pack ? `<div class="callout">${icon('spark', 18)} <span>${todo.length ? `Neem ook ${todo.join(', ')}` : 'Neem de kaarten'}${pack}.</span></div>` : ''}
-    <label class="field"><span>Naam in zoekertje</span>
-      <input class="input" value="${esc(state.makeName)}" placeholder="${esc(unit.name)}" data-make-name aria-label="Naam in zoekertje"></label>
-    ${state.makeName ? '' : `<p class="muted small">Leeg = "${esc(unit.name)}". Bv. "Eevee mini tin" voor een thema; geldt alleen voor deze ${unit.kind === 'tin' ? 'tin' : 'bundel'}.</p>`}
-    ${mustHtml(unit, a.k)}
+    ${listingPreview ? `<div class="listing-peek"><div class="acc-sub">Volgens je zoekertje</div><pre>${esc(listingPreview)}</pre></div>` : ''}
     ${warn.length ? `<div class="callout warnbox">${warn.map((w) => `<div>${w}</div>`).join('')}</div>` : ''}
     <div class="btn-row"><button class="btn small" data-action="make" data-key="${esc(key)}" data-keep="1">Andere mix</button>
       <span class="muted small">Willekeurig, zo weinig mogelijk dezelfde kaarten als je andere klaargemaakte.</span></div>
@@ -974,8 +898,7 @@ async function confirmMake(key) {
   if (pk.kind === 'tin') { pk.stock -= 1; await save.settings(); }
   state.bundles.unshift({
     id: uid(), type: unit.kind, packId: unit.packId, ref: unit.ref,
-    label: state.makeName ? (unit.setName ? `${state.makeName} · ${unit.setName}` : state.makeName) : unit.label,
-    name: state.makeName || unit.name, pokemon: p.pokemon || [],
+    label: unit.label, name: unit.name, pokemon: p.pokemon || [],
     setName: unit.setName, price: unit.price, size: unit.size, cu: unit.n, shiny: unit.shiny, energy: unit.energy, extras: unit.extras,
     cards: b, status: 'gemaakt', createdAt: today(), mode: a.k, steps: {},
   });
@@ -1309,7 +1232,7 @@ function renderSettings() {
       <label class="field"><span>Eigen hashtag (zonder #)</span><input class="input" ${state.editSec === 'listing' ? '' : 'readonly'} value="${esc(S.hashtag || '')}" data-text-setting="hashtag"></label>
       <label class="field"><span>Zoekwoorden onderaan</span><textarea class="input" rows="4" ${state.editSec === 'listing' ? '' : 'readonly'} data-text-setting="keywords">${esc(S.keywords || '')}</textarea></label>
       ${state.editSec === 'listing' ? editBar('listing') : ''}
-      <p class="muted small">Invulvelden in de teksten van tins en bundels: {naam} (naam bij Maak) {pokemon} (gekozen Pokémon) {kaarten} {cu} (gewoon + energy) {holo} {energy} {extras} {set} {prijs} {hashtag} {hashtagsoort} {hashtagset} {hashtagpokemon} (hashtags van de Pokémon) {zoekwoorden}. De app vult ze automatisch in; je hoeft niets manueel te vervangen. Een regel waarin een invulveld leeg of 0 is, valt weg.</p>`)}
+      <p class="muted small">Invulvelden in de teksten van tins en bundels: {naam} {pokemon} (thema-Pokémon in deze tin/bundel) {kaarten} {cu} (gewoon + energy) {holo} {energy} {extras} {set} {prijs} {hashtag} {hashtagsoort} {hashtagset} {hashtagpokemon} (hashtags van de Pokémon) {zoekwoorden}. De app vult ze automatisch in; je hoeft niets manueel te vervangen. Een regel waarin een invulveld leeg of 0 is, valt weg.</p>`)}
     ${acc('backup', 'Back-up', 'alles staat enkel op dit toestel', `
       <p class="muted small">Maak geregeld een back-up: zo raak je je voorraad, bundels en verkopen niet kwijt.</p>
       <div class="btn-row">
@@ -1425,17 +1348,7 @@ async function onClick(e) {
     case 'mode': state.settings.activeMode = Number(el.dataset.k); await save.settings(); render(); break;
     case 'start-analysis': startAnalysisSheet(); break;
     case 'run-analysis': await runAnalysis(); break;
-    case 'make':
-      if (!el.dataset.keep) { state.must = []; state.makeName = ''; }
-      makeSheet(el.dataset.key); break;
-    case 'must-add': state.must.push({ name: '', n: 1 }); makeSheet(el.dataset.key);
-      setTimeout(() => { const i = document.querySelectorAll('[data-must-field="name"]'); i[i.length - 1]?.focus(); }, 50); break;
-    case 'must-remove': {
-      state.must.splice(Number(el.dataset.i), 1);
-      const key = state.pending?.key || document.querySelector('[data-action="confirm-make"]')?.dataset.key;
-      if (key) makeSheet(key);
-      break;
-    }
+    case 'make': makeSheet(el.dataset.key); break;
     case 'confirm-make': await confirmMake(el.dataset.key); break;
     case 'unmake': e.preventDefault(); await unmake(el.dataset.id); break;
     case 'pick': {
@@ -1561,7 +1474,6 @@ async function onChange(e) {
   const el = e.target;
   if (el.dataset.input === 'count') requestCount(el.dataset.card, Number(el.value));
   if (el.dataset.input === 'restore' && el.files?.[0]) await restoreBackup(el.files[0]);
-  if (el.dataset.makeName !== undefined) state.makeName = el.value.trim();
   if (el.dataset.listing) {
     const b = state.bundles.find((x) => x.id === el.dataset.listing);
     if (b) {
@@ -1569,10 +1481,6 @@ async function onChange(e) {
       b.listing = { title: cur.title, text: cur.text, [el.dataset.lf]: el.value };
       await save.bundles();
     }
-  }
-  if (el.dataset.mustField) {
-    const m = state.must[Number(el.dataset.must)];
-    if (m) m[el.dataset.mustField] = el.dataset.mustField === 'n' ? Math.max(1, Math.round(Number(el.value) || 1)) : el.value;
   }
   if (el.dataset.pf) {
     const p = packById(el.dataset.pack);
