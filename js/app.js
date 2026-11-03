@@ -6,7 +6,7 @@ import {
   MODES, TEMPLATES, analysePlan, themeOf, nameMatches, defaultPacks, migrateSettings, parseExtras, isNonShiny, isNonHoloRare, isBundleCard, normNr, parseImport, pickVaried,
 } from './logic.js';
 
-const VERSION = '2.10.0';
+const VERSION = '2.11.0';
 const DAC7 = { sales: 30, revenue: 2000 };
 const PLATFORMS = ['Vinted', '2dehands', 'Anders'];
 
@@ -44,7 +44,7 @@ const state = {
   mode: 1,
   pick: new Set(),    // geselecteerde bundels om te verkopen
   openAcc: null,      // open groep in Instellingen
-  sub: { ana: 'overzicht', prep: 'tins' }, // subtabbladen
+  sub: { ana: 'overzicht', prep: 'tins', sell: 'overzicht' }, // subtabbladen
   openPack: null,     // opengeklapte tin/bundel in Instellingen
   editSec: null,      // blok in Instellingen dat bewerkt wordt
   editSnap: null,     // instellingen van voor het bewerken (voor Annuleren)
@@ -939,8 +939,29 @@ const STEPS = [
 ];
 
 function renderSell() {
-  const open = state.bundles.filter((b) => b.status === 'gemaakt');
-  const sel = open.filter((b) => state.pick.has(b.id));
+  const all = state.bundles.filter((b) => b.status === 'gemaakt');
+  const isTin = (b) => b.type === 'tin';
+  const tins = all.filter(isTin);
+  const bunds = all.filter((b) => !isTin(b));
+  const sub = state.sub.sell;
+  const open = sub === 'tins' ? tins : sub === 'bundels' ? bunds : all;
+  const sum = (list) => list.reduce((t, b) => t + (b.price || 0), 0);
+  const stats = `
+    <div class="stats">
+      <div class="stat"><b>${tins.length}</b><span>tins</span></div>
+      <div class="stat"><b>${bunds.length}</b><span>bundels</span></div>
+      <div class="stat"><b>${eur(sum(all))}</b><span>opbrengst</span></div>
+    </div>`;
+  const revenue = sub === 'overzicht' && all.length ? `
+    <section class="card">
+      <h2>Opbrengst</h2>
+      <ul class="kv">
+        <li><span>Tins (${tins.length})</span><b>${eur(sum(tins))}</b></li>
+        <li><span>Bundels (${bunds.length})</span><b>${eur(sum(bunds))}</b></li>
+        <li><span>Totaal</span><b>${eur(sum(all))}</b></li>
+      </ul>
+    </section>` : '';
+  const sel = all.filter((b) => state.pick.has(b.id));
   const items = open.map((b) => {
     const st = b.steps || {};
     const chips = STEPS.map(([id, label]) => `
@@ -958,13 +979,16 @@ function renderSell() {
         <button class="btn ghost small" data-action="unmake" data-id="${b.id}">Uit elkaar halen</button>
       </div>`;
   }).join('');
-  const outdated = open.filter((b) => { const pk = packById(b.packId); return pk && pk.price !== b.price; }).length;
+  const outdated = all.filter((b) => { const pk = packById(b.packId); return pk && pk.price !== b.price; }).length;
   return `
     <header class="page-head"><h1>Te verkopen</h1>
       <p class="muted small">Tik op een status om ze af te vinken. Koopt iemand er meerdere, vink ze dan eerst aan: een status geldt dan voor de hele selectie.</p></header>
-    ${open.length ? `<div class="btn-row"><button class="btn small" data-action="price-sheet">${icon('refresh', 16)} Prijzen updaten${outdated ? ` (${outdated})` : ''}</button></div>` : ''}
+    ${subTabs('sell', [['overzicht', 'Overzicht'], ['tins', 'Tins'], ['bundels', 'Bundels']])}
+    ${stats}
+    ${revenue}
+    ${all.length ? `<div class="btn-row"><button class="btn small" data-action="price-sheet">${icon('refresh', 16)} Prijzen updaten${outdated ? ` (${outdated})` : ''}</button></div>` : ''}
     ${sel.length ? `<div class="callout">${sel.length} geselecteerd · ${eur(sel.reduce((s, b) => s + b.price, 0))}</div>` : ''}
-    ${items || '<div class="empty">Nog niets klaargemaakt. Ga naar Voorbereiding.</div>'}`;
+    ${items || `<div class="empty">${all.length ? `Geen ${sub} klaar om te verkopen.` : 'Nog niets klaargemaakt. Ga naar Voorbereiding.'}</div>`}`;
 }
 
 // Prijzen van gemaakte tins/bundels gelijkzetten met Instellingen; je kiest zelf welke.
