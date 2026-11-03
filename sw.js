@@ -1,6 +1,6 @@
 // PokeBundels service worker: werkt zonder bereik en meldt nieuwe versies.
 // Verhoog VERSION bij elke release (samen met VERSION in js/app.js).
-const VERSION = '2.9.1';
+const VERSION = '2.9.2';
 const CACHE = 'pb-' + VERSION;
 const FILES = [
   './', 'index.html', 'styles.css', 'manifest.webmanifest',

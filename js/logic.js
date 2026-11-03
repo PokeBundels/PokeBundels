@@ -379,7 +379,8 @@ export function analysePlan(cards, settings, k, setNames = {}) {
       const setName = src === 'mix' ? '' : (setNames[src] || src);
       units.push({
         key: `${p.id}|${src}`, packId: p.id, kind: p.kind, ref: src, name: p.name, setName,
-        label: setName ? `${p.name} · ${setName}` : p.name,
+        // setnaam er alleen bij als die nog niet in de naam van de tin/bundel staat
+        label: setName && !p.name.toLowerCase().includes(setName.toLowerCase()) ? `${p.name} · ${setName}` : p.name,
         count: bundles.length, bundles, pool, n,
         themeN: tn, themeNames: theme.names, themePool, otherPool,
         shiny: p.shiny || 0, energy: p.energy || 0, extras: p.extras || '', price: p.price || 0,
