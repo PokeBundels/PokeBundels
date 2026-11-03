@@ -6,7 +6,7 @@ import {
   MODES, TEMPLATES, analysePlan, themeOf, nameMatches, defaultPacks, migrateSettings, parseExtras, isNonShiny, isNonHoloRare, isBundleCard, normNr, parseImport, pickVaried,
 } from './logic.js';
 
-const VERSION = '2.9.0';
+const VERSION = '2.9.1';
 const DAC7 = { sales: 30, revenue: 2000 };
 const PLATFORMS = ['Vinted', '2dehands', 'Anders'];
 
@@ -1057,7 +1057,7 @@ function stepSheet(id, step) {
     body = `${names}
       <label class="field"><span>Platform</span>
         <select class="input" id="sale-platform">${PLATFORMS.map((p) => `<option>${p}</option>`).join('')}</select></label>
-      <label class="field"><span>Ontvangen bedrag (zonder verzending, na korting)</span>
+      <label class="field"><span>Ontvangen bedrag (zonder verzending, na een eventueel bod)</span>
         <input class="input" id="sale-price" type="number" inputmode="decimal" step="0.01" min="0" value="${total}"></label>
       <label class="field"><span>Datum</span><input class="input" id="step-date" type="date" value="${today()}"></label>
       <p class="muted small">Na bevestigen gaat dit naar Verkocht.</p>`;
