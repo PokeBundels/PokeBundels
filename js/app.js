@@ -6,7 +6,7 @@ import {
   MODES, TEMPLATES, analysePlan, themeOf, nameMatches, defaultPacks, migrateSettings, parseExtras, isNonShiny, isNonHoloRare, isBundleCard, normNr, parseImport, pickVaried,
 } from './logic.js';
 
-const VERSION = '2.11.0';
+const VERSION = '2.11.1';
 const DAC7 = { sales: 30, revenue: 2000 };
 const PLATFORMS = ['Vinted', '2dehands', 'Anders'];
 
@@ -946,21 +946,17 @@ function renderSell() {
   const sub = state.sub.sell;
   const open = sub === 'tins' ? tins : sub === 'bundels' ? bunds : all;
   const sum = (list) => list.reduce((t, b) => t + (b.price || 0), 0);
-  const stats = `
+  // Overzicht: tins + bundels + totaal; Tins of Bundels: enkel die soort
+  const stats = sub === 'overzicht' ? `
     <div class="stats">
       <div class="stat"><b>${tins.length}</b><span>tins</span></div>
       <div class="stat"><b>${bunds.length}</b><span>bundels</span></div>
       <div class="stat"><b>${eur(sum(all))}</b><span>opbrengst</span></div>
+    </div>` : `
+    <div class="stats">
+      <div class="stat"><b>${open.length}</b><span>${sub}</span></div>
+      <div class="stat"><b>${eur(sum(open))}</b><span>opbrengst</span></div>
     </div>`;
-  const revenue = sub === 'overzicht' && all.length ? `
-    <section class="card">
-      <h2>Opbrengst</h2>
-      <ul class="kv">
-        <li><span>Tins (${tins.length})</span><b>${eur(sum(tins))}</b></li>
-        <li><span>Bundels (${bunds.length})</span><b>${eur(sum(bunds))}</b></li>
-        <li><span>Totaal</span><b>${eur(sum(all))}</b></li>
-      </ul>
-    </section>` : '';
   const sel = all.filter((b) => state.pick.has(b.id));
   const items = open.map((b) => {
     const st = b.steps || {};
@@ -985,7 +981,6 @@ function renderSell() {
       <p class="muted small">Tik op een status om ze af te vinken. Koopt iemand er meerdere, vink ze dan eerst aan: een status geldt dan voor de hele selectie.</p></header>
     ${subTabs('sell', [['overzicht', 'Overzicht'], ['tins', 'Tins'], ['bundels', 'Bundels']])}
     ${stats}
-    ${revenue}
     ${all.length ? `<div class="btn-row"><button class="btn small" data-action="price-sheet">${icon('refresh', 16)} Prijzen updaten${outdated ? ` (${outdated})` : ''}</button></div>` : ''}
     ${sel.length ? `<div class="callout">${sel.length} geselecteerd · ${eur(sel.reduce((s, b) => s + b.price, 0))}</div>` : ''}
     ${items || `<div class="empty">${all.length ? `Geen ${sub} klaar om te verkopen.` : 'Nog niets klaargemaakt. Ga naar Voorbereiding.'}</div>`}`;
