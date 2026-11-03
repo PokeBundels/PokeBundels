@@ -6,7 +6,7 @@ import {
   MODES, TEMPLATES, analysePlan, themeOf, nameMatches, defaultPacks, migrateSettings, parseExtras, isNonShiny, isNonHoloRare, isBundleCard, normNr, parseImport, pickVaried,
 } from './logic.js';
 
-const VERSION = '2.9.2';
+const VERSION = '2.10.0';
 const DAC7 = { sales: 30, revenue: 2000 };
 const PLATFORMS = ['Vinted', '2dehands', 'Anders'];
 
@@ -958,11 +958,49 @@ function renderSell() {
         <button class="btn ghost small" data-action="unmake" data-id="${b.id}">Uit elkaar halen</button>
       </div>`;
   }).join('');
+  const outdated = open.filter((b) => { const pk = packById(b.packId); return pk && pk.price !== b.price; }).length;
   return `
     <header class="page-head"><h1>Te verkopen</h1>
       <p class="muted small">Tik op een status om ze af te vinken. Koopt iemand er meerdere, vink ze dan eerst aan: een status geldt dan voor de hele selectie.</p></header>
+    ${open.length ? `<div class="btn-row"><button class="btn small" data-action="price-sheet">${icon('refresh', 16)} Prijzen updaten${outdated ? ` (${outdated})` : ''}</button></div>` : ''}
     ${sel.length ? `<div class="callout">${sel.length} geselecteerd · ${eur(sel.reduce((s, b) => s + b.price, 0))}</div>` : ''}
     ${items || '<div class="empty">Nog niets klaargemaakt. Ga naar Voorbereiding.</div>'}`;
+}
+
+// Prijzen van gemaakte tins/bundels gelijkzetten met Instellingen; je kiest zelf welke.
+function priceSheet() {
+  const open = state.bundles.filter((b) => b.status === 'gemaakt');
+  const rows = open.map((b) => {
+    const pk = packById(b.packId);
+    const now = pk ? pk.price : b.price;
+    const diff = now !== b.price;
+    return `<label class="check price-row">
+      <input type="checkbox" data-price-id="${b.id}" data-price="${now}" ${diff ? 'checked' : 'disabled'}>
+      <span class="price-name">${esc(b.label)}</span>
+      <span class="price-val">${diff ? `<s class="muted">${eur(b.price)}</s> → <b>${eur(now)}</b>` : `<span class="muted">${eur(b.price)}</span>`}</span>
+    </label>`;
+  }).join('');
+  const n = open.filter((b) => { const pk = packById(b.packId); return pk && pk.price !== b.price; }).length;
+  openSheet(`
+    <h2>Prijzen updaten</h2>
+    <p class="muted small">${n ? `${n} item${n === 1 ? '' : 's'} met een andere prijs dan in Instellingen. Vink aan welke je wilt aanpassen.` : 'Alle prijzen komen al overeen met Instellingen.'}</p>
+    <div class="price-list">${rows}</div>
+    <div class="btn-row sticky-actions">
+      <button class="btn" data-action="close-sheet">Annuleren</button>
+      <button class="btn primary" data-action="price-apply" ${n ? '' : 'disabled'}>${icon('check', 18)} Aangevinkte updaten</button>
+    </div>`);
+}
+
+async function applyPrices() {
+  let n = 0;
+  for (const cb of document.querySelectorAll('[data-price-id]:checked')) {
+    const b = state.bundles.find((x) => x.id === cb.dataset.priceId);
+    if (b) { b.price = Number(cb.dataset.price); n++; }
+  }
+  await save.bundles();
+  closeSheet();
+  toast(`${n} prijs${n === 1 ? '' : 'zen'} aangepast.`);
+  render();
 }
 
 function stepTargets(id) {
@@ -1364,6 +1402,8 @@ async function onClick(e) {
       break;
     }
     case 'step': stepSheet(el.dataset.id, el.dataset.step); break;
+    case 'price-sheet': priceSheet(); break;
+    case 'price-apply': await applyPrices(); break;
     case 'step-ok': await confirmStep(el.dataset.id, el.dataset.step); break;
     case 'step-clear': await clearStep(el.dataset.id, el.dataset.step); break;
     case 'copy': {
