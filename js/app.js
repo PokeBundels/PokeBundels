@@ -6,7 +6,7 @@ import {
   MODES, TEMPLATES, analysePlan, themeOf, nameMatches, defaultPacks, migrateSettings, parseExtras, isNonShiny, isNonHoloRare, isBundleCard, normNr, parseImport, pickVaried,
 } from './logic.js';
 
-const VERSION = '2.11.1';
+const VERSION = '2.12.0';
 const DAC7 = { sales: 30, revenue: 2000 };
 const PLATFORMS = ['Vinted', '2dehands', 'Anders'];
 
@@ -653,6 +653,7 @@ function renderAnalysis() {
           <p class="muted small">${esc(compText(p))} · ${esc(sourceName(p.source))} · ${eur(p.price)} per stuk${kind === 'tin' ? ` · ${p.stock || 0} tins beschikbaar` : ''}</p>
           <ul class="kv"><li><span>Opbrengst</span><b>${eur(n * (p.price || 0))}</b></li></ul>
           ${rows ? `<ul class="kv">${rows}</ul>` : ''}
+          ${kind !== 'tin' && n === 0 && (p.cu || 0) > 0 ? `<p class="small warn">Geen kaarten meer over voor deze bundel: ${p.source === 'mix' ? 'tins en bundels uit één set of per set gaan voor en gebruiken de kaarten al' : 'een andere bundel hoger in de lijst gebruikt ze al'}. Geef die een maximum aantal of zet deze hoger.</p>` : ''}
           ${kind === 'tin' && n < (p.stock || 0) ? `<p class="small warn">Niet genoeg ${themeOf(p).n ? 'thema-Pokémon of ' : ''}kaarten voor alle ${p.stock} tins.</p>` : ''}
           ${themeOf(p).n && (kind !== 'tin' || n < (p.stock || 0)) ? `<div class="btn-row"><button class="btn small" data-action="theme-add" data-pack="${esc(p.id)}">${icon('plus', 16)} Thema-kaarten toevoegen</button></div>` : ''}
           ${units.some((u) => u.themeN > 0) ? `<p class="muted small">Thema-Pokémon in voorraad: ${units.reduce((s2, u) => s2 + u.themePool.reduce((t, c) => t + c.count, 0), 0)} kaarten (${units.reduce((s2, u) => s2 + u.themePool.length, 0)} verschillend), worden eerst voor deze ${kind === 'tin' ? 'tins' : 'bundels'} gereserveerd.</p>` : ''}
@@ -1247,7 +1248,7 @@ function packEditor(p) {
           ${f('energy', 'Energy', 'number', 'min="0" inputmode="numeric"')}
           ${f('price', 'Prijs (€)', 'number', 'min="0" step="0.05" inputmode="decimal"')}
         </div>
-        ${p.kind === 'tin' ? f('stock', 'Beschikbare tins', 'number', 'min="0" inputmode="numeric"') : ''}
+        ${p.kind === 'tin' ? f('stock', 'Beschikbare tins', 'number', 'min="0" inputmode="numeric"') : f('max', 'Maximum aantal bundels (leeg = zoveel mogelijk)', 'number', 'min="0" inputmode="numeric"')}
         ${f('extras', 'Extra (bv. 1 sticker, 1 coin)', 'text')}
         <div class="acc-sub">Thema (optioneel)</div>
         ${f('themeNames', 'Thema-Pokémon, met komma (bv. Eevee, Vaporeon, Jolteon)', 'text')}
@@ -1553,6 +1554,7 @@ async function onChange(e) {
     if (!p) return;
     const f = el.dataset.pf;
     if (['name', 'extras', 'title', 'text', 'source', 'themeNames'].includes(f)) p[f] = f === 'name' ? (el.value.trim() || p.name) : el.value;
+    else if (f === 'max' && el.value.trim() === '') p.max = null;
     else {
       const v = Number(el.value);
       if (!Number.isFinite(v) || v < 0) { toast('Ongeldig getal.'); return; }

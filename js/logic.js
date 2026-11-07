@@ -144,6 +144,10 @@ export function migrateSettings(saved) {
 /** Thema-tins eerst (die reserveren hun Pokémon), dan de andere tins, dan bundels; binnen elk de volgorde uit de instellingen. */
 export function orderedPacks(packs) {
   const themed = (p) => themeOf(p).n > 0;
+  // binnen elke groep: eerst één vaste set, dan per set, dan willekeurig (die kan alles gebruiken)
+  const spec = (p) => (p.source === 'mix' || !p.source ? 2 : p.source === 'perset' ? 1 : 0);
+  const sorted = packs.map((p, i) => [p, i]).sort((a, b) => spec(a[0]) - spec(b[0]) || a[1] - b[1]).map(([p]) => p);
+  packs = sorted;
   return [
     ...packs.filter((p) => p.kind === 'tin' && themed(p)),
     ...packs.filter((p) => p.kind === 'tin' && !themed(p)),
@@ -349,7 +353,8 @@ export function analysePlan(cards, settings, k, setNames = {}) {
   const units = [];
   for (const p of orderedPacks(settings.packs || [])) {
     const n = Math.max(0, Math.round(p.cu || 0));
-    let cap = p.kind === 'tin' ? Math.max(0, Math.round(p.stock || 0)) : Infinity;
+    let cap = p.kind === 'tin' ? Math.max(0, Math.round(p.stock || 0))
+      : (p.max === null || p.max === undefined || p.max === '' ? Infinity : Math.max(0, Math.round(p.max)));
     const sources = p.source === 'perset' ? setIds : [p.source || 'mix'];
     const theme = themeOf(p);
     const tn = Math.min(theme.n, n);
