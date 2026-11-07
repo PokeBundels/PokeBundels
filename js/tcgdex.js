@@ -15,7 +15,7 @@ async function getJson(url) {
 /** Lijst van beschikbare sets (XY tot Mega Evolution), nieuwste eerst. */
 export async function listSets(force = false) {
   const cached = await db.get('setlist2');
-  if (cached && !force && Date.now() - cached.at < 7 * 864e5) return cached.sets;
+  if (cached && !force && Date.now() - cached.at < 864e5) return cached.sets;
   const all = [];
   for (const s of SERIES) {
     try {

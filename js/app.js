@@ -6,7 +6,7 @@ import {
   MODES, TEMPLATES, analysePlan, themeOf, nameMatches, defaultPacks, migrateSettings, parseExtras, isNonShiny, isNonHoloRare, isBundleCard, normNr, parseImport, pickVaried,
 } from './logic.js';
 
-const VERSION = '2.12.0';
+const VERSION = '2.12.1';
 const DAC7 = { sales: 30, revenue: 2000 };
 const PLATFORMS = ['Vinted', '2dehands', 'Anders'];
 
@@ -445,6 +445,7 @@ async function addSetFlow() {
       <div class="btn-row"><button class="btn primary" data-action="add-set-id">Toevoegen</button></div>`);
     return;
   }
+  let refreshed = false;
   const marked = (id) => state.settings.mySets.includes(id);
   const item = (s) => `
     <button class="set-pick ${marked(s.id) ? 'have' : ''}" data-action="pick-set" data-set="${esc(s.id)}">
@@ -466,7 +467,7 @@ async function addSetFlow() {
         <button class="btn" data-action="show-all-sets">Alle sets tonen (${sets.length})</button>`;
     }
     const list = q ? sets.filter((s) => s.name.toLowerCase().includes(q) || s.id.toLowerCase().includes(q)) : sets;
-    return list.length ? grouped(list) : '<p class="muted">Geen set gevonden.</p>';
+    return list.length ? grouped(list) : `<p class="muted">Geen set gevonden.</p>${refreshed ? '<p class="muted small">Ook na vernieuwen niet: TCGdex heeft deze set nog niet. Nieuwe sets komen daar meestal enkele dagen na de release.</p>' : ''}`;
   };
   openSheet(`
     <h2>${title}</h2>
@@ -478,7 +479,21 @@ async function addSetFlow() {
     </details>`, (el) => {
     const box = el.querySelector('#set-pick-list');
     const input = el.querySelector('#set-search');
-    input.addEventListener('input', () => { box.innerHTML = html(input.value.trim().toLowerCase(), false); });
+    let timer;
+    input.addEventListener('input', () => {
+      const q = input.value.trim().toLowerCase();
+      box.innerHTML = html(q, false);
+      // niets gevonden? setlijst één keer opnieuw ophalen, de set kan nieuw zijn
+      clearTimeout(timer);
+      if (q.length >= 3 && !refreshed && !sets.some((s) => s.name.toLowerCase().includes(q) || s.id.toLowerCase().includes(q))) {
+        timer = setTimeout(async () => {
+          refreshed = true;
+          box.innerHTML = '<p class="muted">Setlijst vernieuwen…</p>';
+          try { sets = await listSets(true); state.setList = sets; } catch {}
+          box.innerHTML = html(input.value.trim().toLowerCase(), false);
+        }, 600);
+      }
+    });
     box.addEventListener('click', (e) => {
       if (e.target.closest('[data-action="show-all-sets"]')) {
         e.stopPropagation();
@@ -510,7 +525,7 @@ async function loadSet(setId, { force = false, open = true } = {}) {
     render();
     return set;
   } catch (e) {
-    openSheet(`<h2>Set laden mislukt</h2><p class="error">${esc(e.message)}</p><p class="muted small">Controleer je internetverbinding en het set-ID.</p>`);
+    openSheet(`<h2>Set laden mislukt</h2><p class="error">${esc(e.message)}</p><p class="muted small">${/ 404 /.test(e.message) ? `TCGdex kent set "${esc(setId)}" (nog) niet. Is de set pas uit, probeer het dan over enkele dagen opnieuw.` : 'Controleer je internetverbinding en het set-ID.'}</p>`);
     return null;
   }
 }
